@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, isLikelyUkDl, UK_DL_NUMBER_RE } from './ukDlNumber.js'
+import { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, isLikelyUkDl, findDatesInText, UK_DL_NUMBER_RE } from './ukDlNumber.js'
 import { getCountryFormat } from './internationalIdFormats.js'
 
 // NOTE: all licence numbers below are SYNTHETIC — never real card data.
@@ -62,6 +62,30 @@ describe('applyUkDlCrossCheck', () => {
     applyUkDlCrossCheck(o, 'DE')
     expect(o.date_of_birth).toBeUndefined()
   })
+  // OCR sometimes garbles the "4b." expiry label (e.g. "b.2"); recover the expiry
+  // as the latest date that isn't the DOB (issue date is earlier).
+  it('recovers a missing expiry when its label is garbled', () => {
+    const o: any = {
+      document_number: 'CHOUP858085Y99JS',
+      date_of_birth: '1985-08-08',
+      expiration_date: '',
+      raw_text: '3. 08.08.1985 IRAN\n4a. 02.09.2020 4c. DVLA\n b.2 25.08.2030\n5. CHOUP858085Y99JS 57',
+      confidence_scores: {},
+    }
+    applyUkDlCrossCheck(o, 'GB')
+    expect(o.expiration_date).toBe('2030-08-25')
+  })
+  it('does not overwrite an expiry that was already extracted', () => {
+    const o: any = {
+      document_number: 'SMITH803125JM9AB',
+      date_of_birth: '1985-03-12',
+      expiration_date: '2030-01-01',
+      raw_text: '4b. 25.08.2035',
+      confidence_scores: {},
+    }
+    applyUkDlCrossCheck(o, 'GB')
+    expect(o.expiration_date).toBe('2030-01-01')
+  })
   // The numbered-field parser sometimes drops field 5 (separate line / merged with 7).
   it('recovers the licence number from raw OCR text when field 5 is missing', () => {
     const o: any = {
@@ -103,6 +127,13 @@ describe('isLikelyUkDl', () => {
     expect(isLikelyUkDl('CALIFORNIA DRIVER LICENSE DL D1234567')).toBe(false)
     expect(isLikelyUkDl('')).toBe(false)
     expect(isLikelyUkDl(null)).toBe(false)
+  })
+})
+
+describe('findDatesInText', () => {
+  it('extracts DMY dates as ISO and drops invalid ones', () => {
+    expect(findDatesInText('DOB 08.08.1985, exp 25.08.2030, junk 99.99.2020'))
+      .toEqual(['1985-08-08', '2030-08-25'])
   })
 })
 

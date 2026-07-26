@@ -78,19 +78,42 @@ export function isLikelyUkDl(rawText: string | null | undefined): boolean {
   return /\bDVLA\b/i.test(rawText)
 }
 
+/**
+ * Extract all DD.MM.YYYY (or /- separated) dates from OCR text as ISO strings,
+ * interpreted day-month-year (UK convention). Invalid day/month combinations are
+ * dropped. Used to recover the expiry when its "4b." label is garbled by OCR.
+ */
+export function findDatesInText(rawText: string | null | undefined): string[] {
+  if (!rawText) return []
+  const out: string[] = []
+  const re = /\b(\d{2})[.\/-](\d{2})[.\/-](\d{4})\b/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(rawText)) !== null) {
+    const day = Number(m[1]); const month = Number(m[2]); const year = Number(m[3])
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1900 && year <= 2100) {
+      out.push(`${m[3]}-${m[2]}-${m[1]}`)
+    }
+  }
+  return out
+}
+
 // Structural subset of OCRData the cross-check needs (avoids a type-path import).
 export interface UkDlCrossCheckTarget {
   document_number?: string | null
   date_of_birth?: string | null
+  expiration_date?: string | null
   confidence_scores?: Record<string, number> | null
   raw_text?: string | null
 }
 
 /**
- * For a GB driving licence: normalise the licence number to its canonical 16-char
- * form, recover it from the raw OCR text when field 5 was not cleanly extracted,
- * and cross-check the DOB encoded in the number against the OCR'd DOB (fill if
- * missing, raise confidence when it agrees). All deterministic; never a gate.
+ * For a GB driving licence, using the raw OCR text and the checksum-grade licence
+ * number to make extraction robust to OCR quirks. All deterministic; never a gate:
+ *   - normalise the licence number to its canonical 16-char form, recovering it
+ *     from the text when field 5 was mis-parsed;
+ *   - fill/confirm the DOB from the DOB encoded in the licence number;
+ *   - recover a missing expiry (4b) when OCR garbles its label — the latest date
+ *     on the card that is not the DOB (the issue date is always earlier).
  */
 export function applyUkDlCrossCheck(target: UkDlCrossCheckTarget, country?: string | null): void {
   if ((country || '').toUpperCase() !== 'GB') return
@@ -107,12 +130,25 @@ export function applyUkDlCrossCheck(target: UkDlCrossCheckTarget, country?: stri
   }
   if (core) target.document_number = core
 
+  // Fill / confirm the DOB from the licence number.
   const decoded = decodeUkDlNumber(core)
-  if (!decoded?.dateOfBirth) return
-  if (!target.date_of_birth) {
-    target.date_of_birth = decoded.dateOfBirth
-    scores.date_of_birth = Math.max(scores.date_of_birth ?? 0, 0.9)
-  } else if (target.date_of_birth === decoded.dateOfBirth) {
-    scores.date_of_birth = Math.max(scores.date_of_birth ?? 0, 0.95)
+  if (decoded?.dateOfBirth) {
+    if (!target.date_of_birth) {
+      target.date_of_birth = decoded.dateOfBirth
+      scores.date_of_birth = Math.max(scores.date_of_birth ?? 0, 0.9)
+    } else if (target.date_of_birth === decoded.dateOfBirth) {
+      scores.date_of_birth = Math.max(scores.date_of_birth ?? 0, 0.95)
+    }
+  }
+
+  // Recover a missing expiry: latest date on the card that isn't the DOB.
+  if (!target.expiration_date && target.raw_text) {
+    const others = findDatesInText(target.raw_text)
+      .filter(d => d !== target.date_of_birth)
+      .sort()
+    if (others.length) {
+      target.expiration_date = others[others.length - 1]
+      scores.expiration_date = Math.max(scores.expiration_date ?? 0, 0.7)
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { decodeUkDlNumber, applyUkDlCrossCheck, UK_DL_NUMBER_RE } from './ukDlNumber.js'
+import { getCountryFormat } from './internationalIdFormats.js'
 
 // NOTE: all licence numbers below are SYNTHETIC — never real card data.
 
@@ -60,5 +61,25 @@ describe('applyUkDlCrossCheck', () => {
     const o: any = { document_number: 'SMITH803125JM9AB', confidence_scores: {} }
     applyUkDlCrossCheck(o, 'DE')
     expect(o.date_of_birth).toBeUndefined()
+  })
+})
+
+describe('GB driving-licence format', () => {
+  const fmt = getCountryFormat('GB', 'drivers_license')!
+
+  it('is registered', () => {
+    expect(fmt).toBeTruthy()
+    expect(fmt.date_format).toBe('DMY')
+  })
+  it('accepts a real-shaped UK licence number (incl. issue number + 9-padded surname)', () => {
+    expect(fmt.id_number_regex.test('SMITH803125JM9AB 12')).toBe(true)
+    expect(fmt.id_number_regex.test('LEE99803125JM9AB')).toBe(true)
+  })
+  it('exposes the UK numbered-field label markers', () => {
+    expect(fmt.field_labels.name.some(r => r.test('1'))).toBe(true)
+    expect(fmt.field_labels.date_of_birth.some(r => r.test('3'))).toBe(true)
+    expect(fmt.field_labels.expiry_date.some(r => r.test('4b'))).toBe(true)
+    expect(fmt.field_labels.id_number.some(r => r.test('5.'))).toBe(true)
+    expect(fmt.field_labels.address.some(r => r.test('8'))).toBe(true)
   })
 })

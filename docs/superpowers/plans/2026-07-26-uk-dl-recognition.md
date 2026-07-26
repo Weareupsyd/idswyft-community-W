@@ -61,6 +61,16 @@ describe('decodeUkDlNumber', () => {
     expect(decodeUkDlNumber('smith 803125 jm9ab')).toEqual({ dateOfBirth: '1985-03-12', sex: 'M' })
   })
 
+  // Real UK cards print field 5 as the 16-char number + space + a 2-digit issue number.
+  it('strips the trailing issue number', () => {
+    expect(decodeUkDlNumber('SMITH803125JM9AB 12')).toEqual({ dateOfBirth: '1985-03-12', sex: 'M' })
+  })
+
+  // Short surnames are padded with 9 (e.g. a 4-letter surname → NAME9).
+  it('decodes a 9-padded short surname', () => {
+    expect(decodeUkDlNumber('JANI9961031S99TP 69')).toEqual({ dateOfBirth: '1991-11-03', sex: 'F' })
+  })
+
   it('returns null for non-UK / malformed input', () => {
     expect(decodeUkDlNumber('D1234567')).toBeNull()      // German-style
     expect(decodeUkDlNumber('')).toBeNull()
@@ -88,8 +98,11 @@ Expected: FAIL — cannot find `./ukDlNumber.js`.
 // checksum-grade cross-check the free-text OCR fields cannot. Pure functions.
 
 // 5 surname chars (9-padded) · 6 DOB digits · 2 initials (9-padded) · arbitration
-// digit · 2 check chars. Tail kept tolerant (check chars vary: digits or letters).
-export const UK_DL_NUMBER_RE = /^[A-Z9]{5}\d{6}[A-Z0-9]{2}\d[A-Z0-9]{2}$/
+// digit · 2 check chars (tolerant tail). Real cards print field 5 as this 16-char
+// number + a space + a 1-2 digit ISSUE NUMBER, which must be ignored.
+export const UK_DL_NUMBER_RE = /^[A-Z9]{5}\d{6}[A-Z0-9]{2}\d[A-Z0-9]{2}(?:\s*\d{1,2})?$/
+// Captures just the 16-char DVLA number, dropping any trailing issue number.
+const UK_DL_CORE_RE = /^([A-Z9]{5}\d{6}[A-Z0-9]{2}\d[A-Z0-9]{2})\d{0,2}$/
 
 export interface UkDlDecoded {
   dateOfBirth: string | null // ISO YYYY-MM-DD
@@ -98,8 +111,9 @@ export interface UkDlDecoded {
 
 export function decodeUkDlNumber(raw: string | null | undefined): UkDlDecoded | null {
   if (!raw) return null
-  const n = raw.replace(/\s+/g, '').toUpperCase()
-  if (!UK_DL_NUMBER_RE.test(n)) return null
+  const m = raw.toUpperCase().replace(/\s+/g, '').match(UK_DL_CORE_RE)
+  if (!m) return null
+  const n = m[1] // 16-char DVLA number, issue number stripped
 
   const decade = Number(n[5])
   let month = Number(n.slice(6, 8))

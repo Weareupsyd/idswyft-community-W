@@ -1,0 +1,5 @@
+# OCR benchmark inputs (never commit real licence images)
+scripts/ocr-benchmark/images/*
+!scripts/ocr-benchmark/images/.gitkeep
+scripts/ocr-benchmark/expected/*
+!scripts/ocr-benchmark/expected/.gitkeep

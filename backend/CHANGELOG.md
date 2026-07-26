@@ -5,6 +5,30 @@ All notable changes to the Idswyft Main API are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.18] - 2026-07-26
+
+EU / MRZ document extraction fixes — community contribution from @ClausSBG
+(community PR #50, issues #46–49), found self-hosting v1.12.17 with genuine
+Austrian documents. Four compounding defects, each alone enough to reject a valid
+EU passport or licence.
+
+### Fixed
+- **MRZ fields carried no confidence scores** → the average collapsed to the `0.5`
+  fallback and Gate 1 rejected a checksum-valid MRZ (the most trustworthy source
+  treated as the least). MRZ-sourced fields now carry `0.99` when check digits
+  validate, else `0.75`; the confidence average is computed **after** MRZ
+  enrichment in both `backend/newVerification.ts` and `engine/extract.ts`.
+- **No image orientation correction** — sideways phone photos (often with no EXIF
+  tag) OCR to garbage. `extractWithOrientation()` honours EXIF, scores the upright
+  result, and tries the remaining rotations, reusing the winning buffer for face +
+  tamper detection. Early-exits after a good read (one OCR pass in the common case).
+- **MRZ expiry parsed into the past** (2031 read as 1931). Century is now resolved
+  by field semantics (birth vs expiry) rather than a single fixed pivot.
+- **EU driving-licence header regex** required the complete word; it now tolerates a
+  dropped trailing glyph and flattened diacritics. Unregistered countries fall back
+  to a generic EU layout (`getGenericEUFormat`) instead of the US extraction path;
+  adds an Austria (`AT`) format entry.
+
 ## [1.12.17] - 2026-07-02
 
 Page Builder theming completeness + live preview, and Settings access for service

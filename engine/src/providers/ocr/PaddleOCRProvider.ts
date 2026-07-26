@@ -7,7 +7,7 @@ import type { OCRProvider, OCRData, CountryDocFormat, LLMProviderConfig, Classif
 import {
   getCountryFormat, getGenericEUFormat, INTERNATIONAL_HEADER_NOISE, STATE_DL_FORMATS,
   findLowConfidenceFields, extractFieldsWithLLM, mergeLLMResults,
-  classifyDocument,
+  classifyDocument, applyUkDlCrossCheck,
 } from '@idswyft/shared';
 import { logger } from '@/utils/logger.js';
 
@@ -349,6 +349,8 @@ export class PaddleOCRProvider implements OCRProvider {
         });
       }
       this.extractInternationalDocument(result.lines, ocrData, effectiveFormat, country);
+      // UK DL: cross-check DOB against the licence number (deterministic, non-gating)
+      applyUkDlCrossCheck(ocrData, country);
     } else {
       // Default extraction (US or unknown country)
       switch (resolvedDocType) {

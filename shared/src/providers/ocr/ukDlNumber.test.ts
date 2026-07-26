@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeUkDlNumber, applyUkDlCrossCheck, UK_DL_NUMBER_RE } from './ukDlNumber.js'
+import { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, UK_DL_NUMBER_RE } from './ukDlNumber.js'
 import { getCountryFormat } from './internationalIdFormats.js'
 
 // NOTE: all licence numbers below are SYNTHETIC — never real card data.
@@ -61,6 +61,34 @@ describe('applyUkDlCrossCheck', () => {
     const o: any = { document_number: 'SMITH803125JM9AB', confidence_scores: {} }
     applyUkDlCrossCheck(o, 'DE')
     expect(o.date_of_birth).toBeUndefined()
+  })
+  // The numbered-field parser sometimes drops field 5 (separate line / merged with 7).
+  it('recovers the licence number from raw OCR text when field 5 is missing', () => {
+    const o: any = {
+      document_number: null,
+      raw_text: 'UK DRIVING LICENCE\n1. NAME\n3. 12.03.1985 IRAN\n 5. SMITH803125JM9AB 12   7. o\n9. AM/B',
+      confidence_scores: {},
+    }
+    applyUkDlCrossCheck(o, 'GB')
+    expect(o.document_number).toBe('SMITH803125JM9AB')
+    expect(o.date_of_birth).toBe('1985-03-12')
+  })
+  it('normalizes an extracted number to its 16-char canonical form (issue no. stripped)', () => {
+    const o: any = { document_number: 'SMITH803125JM9AB49', confidence_scores: {} }
+    applyUkDlCrossCheck(o, 'GB')
+    expect(o.document_number).toBe('SMITH803125JM9AB')
+  })
+})
+
+describe('findUkDlNumber / normalizeUkDlNumber', () => {
+  it('normalizeUkDlNumber strips the issue number', () => {
+    expect(normalizeUkDlNumber('SMITH803125JM9AB 12')).toBe('SMITH803125JM9AB')
+    expect(normalizeUkDlNumber('SMITH803125JM9AB49')).toBe('SMITH803125JM9AB')
+    expect(normalizeUkDlNumber('not-a-number')).toBeNull()
+  })
+  it('findUkDlNumber locates a valid number in noisy OCR text', () => {
+    expect(findUkDlNumber('5.\nSMITH803125JM9AB 12\n8. address')).toBe('SMITH803125JM9AB')
+    expect(findUkDlNumber('no licence number here')).toBeNull()
   })
 })
 

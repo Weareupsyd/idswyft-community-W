@@ -50,7 +50,7 @@ export {
   getGenericEUFormat,
   validateIdNumber,
 } from './providers/ocr/internationalIdFormats.js';
-export { decodeUkDlNumber, applyUkDlCrossCheck, UK_DL_NUMBER_RE } from './providers/ocr/ukDlNumber.js';
+export { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, UK_DL_NUMBER_RE } from './providers/ocr/ukDlNumber.js';
 export type { UkDlDecoded } from './providers/ocr/ukDlNumber.js';
 export type { CountryDocFormat, CountryIdFormat } from './providers/ocr/internationalIdFormats.js';
 export {

@@ -43,23 +43,59 @@ export function decodeUkDlNumber(raw: string | null | undefined): UkDlDecoded | 
   return { dateOfBirth, sex }
 }
 
+/** Return the canonical 16-char DVLA number (issue number stripped), or null. */
+export function normalizeUkDlNumber(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const m = raw.toUpperCase().replace(/\s+/g, '').match(UK_DL_CORE_RE)
+  return m ? m[1] : null
+}
+
+/**
+ * Find a valid UK DL number anywhere in OCR text — used to recover the licence
+ * number when the numbered-field parser mis-attributes field 5 (e.g. the number
+ * sits on a separate line from its "5." label, or is merged with field 7).
+ * Each candidate token is validated by the decoder, so a random match cannot win.
+ */
+export function findUkDlNumber(rawText: string | null | undefined): string | null {
+  if (!rawText) return null
+  for (const token of rawText.toUpperCase().split(/[\s,]+/)) {
+    const core = normalizeUkDlNumber(token)
+    if (core && decodeUkDlNumber(core)) return core
+  }
+  return null
+}
+
 // Structural subset of OCRData the cross-check needs (avoids a type-path import).
 export interface UkDlCrossCheckTarget {
   document_number?: string | null
   date_of_birth?: string | null
   confidence_scores?: Record<string, number> | null
+  raw_text?: string | null
 }
 
 /**
- * When a GB driving licence is detected, use the DOB encoded in the licence
- * number to (a) fill a missing DOB, or (b) raise confidence when it agrees with
- * the OCR'd DOB. A disagreement is left untouched — a soft signal, never a gate.
+ * For a GB driving licence: normalise the licence number to its canonical 16-char
+ * form, recover it from the raw OCR text when field 5 was not cleanly extracted,
+ * and cross-check the DOB encoded in the number against the OCR'd DOB (fill if
+ * missing, raise confidence when it agrees). All deterministic; never a gate.
  */
 export function applyUkDlCrossCheck(target: UkDlCrossCheckTarget, country?: string | null): void {
   if ((country || '').toUpperCase() !== 'GB') return
-  const decoded = decodeUkDlNumber(target.document_number)
-  if (!decoded?.dateOfBirth) return
   const scores = (target.confidence_scores = target.confidence_scores || {})
+
+  // Normalise field 5, or recover it from raw text if it was mis-parsed.
+  let core = normalizeUkDlNumber(target.document_number)
+  if (!core || !decodeUkDlNumber(core)) {
+    const recovered = findUkDlNumber(target.raw_text)
+    if (recovered) {
+      core = recovered
+      scores.document_number = Math.max(scores.document_number ?? 0, 0.9)
+    }
+  }
+  if (core) target.document_number = core
+
+  const decoded = decodeUkDlNumber(core)
+  if (!decoded?.dateOfBirth) return
   if (!target.date_of_birth) {
     target.date_of_birth = decoded.dateOfBirth
     scores.date_of_birth = Math.max(scores.date_of_birth ?? 0, 0.9)

@@ -65,6 +65,19 @@ export function findUkDlNumber(rawText: string | null | undefined): string | nul
   return null
 }
 
+/**
+ * Deterministic UK driving-licence detector for OCR text. UK DLs have no MRZ, so
+ * the issuing country cannot be inferred from a checksum the way passports/ID cards
+ * are — when the caller supplies no country, this lets the engine still route to the
+ * UK extractor. Triggers on a decoder-validated DVLA licence number, or the UK-only
+ * "DVLA" marker — both strong signals that will not false-positive on other cards.
+ */
+export function isLikelyUkDl(rawText: string | null | undefined): boolean {
+  if (!rawText) return false
+  if (findUkDlNumber(rawText)) return true
+  return /\bDVLA\b/i.test(rawText)
+}
+
 // Structural subset of OCRData the cross-check needs (avoids a type-path import).
 export interface UkDlCrossCheckTarget {
   document_number?: string | null

@@ -3,7 +3,7 @@
 let PaddleOcrService: any;
 type PaddleOcrResult = any;
 import type { OCRProvider, LLMProviderConfig, ClassificationResult } from '@idswyft/shared';
-import { getCountryFormat, findLowConfidenceFields, extractFieldsWithLLM, mergeLLMResults, classifyDocument } from '@idswyft/shared';
+import { getCountryFormat, findLowConfidenceFields, extractFieldsWithLLM, mergeLLMResults, classifyDocument, isLikelyUkDl } from '@idswyft/shared';
 import { OCRData } from '../../types/index.js';
 import { logger } from '@/utils/logger.js';
 import { DriversLicenseExtractor } from './extractors/DriversLicenseExtractor.js';
@@ -67,8 +67,15 @@ export class PaddleOCRProvider implements OCRProvider {
       });
     }
 
+    // UK driving licences have no MRZ, so the country can't be auto-detected from a
+    // checksum. When the caller supplies none, detect a UK DL from the text → route to GB.
+    let country = issuingCountry?.toUpperCase();
+    if (!country && isLikelyUkDl(result.text)) {
+      country = 'GB';
+      logger.info('Auto-detected UK driving licence (no issuing country supplied)');
+    }
+
     // Language awareness: log when non-Latin script detected
-    const country = issuingCountry?.toUpperCase();
     if (country && !isDefaultModelSupported(country)) {
       const script = getDocumentScript(country);
       logger.info('Non-Latin script detected — extraction quality may vary', {

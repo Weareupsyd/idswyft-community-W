@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, UK_DL_NUMBER_RE } from './ukDlNumber.js'
+import { decodeUkDlNumber, applyUkDlCrossCheck, findUkDlNumber, normalizeUkDlNumber, isLikelyUkDl, UK_DL_NUMBER_RE } from './ukDlNumber.js'
 import { getCountryFormat } from './internationalIdFormats.js'
 
 // NOTE: all licence numbers below are SYNTHETIC — never real card data.
@@ -89,6 +89,20 @@ describe('findUkDlNumber / normalizeUkDlNumber', () => {
   it('findUkDlNumber locates a valid number in noisy OCR text', () => {
     expect(findUkDlNumber('5.\nSMITH803125JM9AB 12\n8. address')).toBe('SMITH803125JM9AB')
     expect(findUkDlNumber('no licence number here')).toBeNull()
+  })
+})
+
+describe('isLikelyUkDl', () => {
+  it('detects a UK DL from a licence number in the text', () => {
+    expect(isLikelyUkDl('3. 12.03.1985 IRAN\n5. SMITH803125JM9AB 12')).toBe(true)
+  })
+  it('detects a UK DL from the DVLA marker', () => {
+    expect(isLikelyUkDl('DRIVING LICENCE\n4c. DVLA\n8. address')).toBe(true)
+  })
+  it('does not fire on unrelated documents', () => {
+    expect(isLikelyUkDl('CALIFORNIA DRIVER LICENSE DL D1234567')).toBe(false)
+    expect(isLikelyUkDl('')).toBe(false)
+    expect(isLikelyUkDl(null)).toBe(false)
   })
 })
 

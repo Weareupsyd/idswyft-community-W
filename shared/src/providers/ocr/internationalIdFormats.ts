@@ -5,6 +5,8 @@
  * and date format hints for OCR extraction.
  */
 
+import { UK_DL_NUMBER_RE } from './ukDlNumber.js';
+
 export interface CountryDocFormat {
   type: 'drivers_license' | 'national_id' | 'passport';
   id_number_regex: RegExp;
@@ -102,10 +104,18 @@ export const INTERNATIONAL_ID_FORMATS: Record<string, CountryIdFormat> = {
     document_types: [
       {
         type: 'drivers_license',
-        id_number_regex: /^[A-Z]{5}\d{6}[A-Z0-9]{2}\d[A-Z]{2}$/,
+        // DVLA number (9-padded surname + trailing issue number tolerated).
+        id_number_regex: UK_DL_NUMBER_RE,
         field_labels: {
           ...ENGLISH_LABELS,
-          id_number: [/licence\s*no/i, /driving\s*licence/i, /\bdln?\b/i, ...ENGLISH_LABELS.id_number],
+          // UK/EU numbered layout: 1 surname · 2 forenames · 3 DOB/place ·
+          // 4a issue · 4b expiry · 4c authority · 5 licence no · 8 address
+          name: [/^1\.?$/, /^2\.?$/, /surname/i, ...ENGLISH_LABELS.name],
+          date_of_birth: [/^3\.?$/, ...ENGLISH_LABELS.date_of_birth],
+          expiry_date: [/^4b\.?$/i, /valid\s*to/i, ...ENGLISH_LABELS.expiry_date],
+          id_number: [/^5\.?$/, /driving\s*licence/i, /dvla/i, /licence\s*no/i, /\bdln?\b/i, ...ENGLISH_LABELS.id_number],
+          address: [/^8\.?$/, ...ENGLISH_LABELS.address],
+          issuing_authority: [/^4c\.?$/i, /dvla/i, ...ENGLISH_LABELS.issuing_authority],
         },
         date_format: 'DMY',
         has_mrz: false,

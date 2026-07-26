@@ -1,4 +1,5 @@
 import type { OCRData, CountryDocFormat } from '@idswyft/shared';
+import { applyUkDlCrossCheck } from '@idswyft/shared';
 import type { FlatLine } from '../types.js';
 import { logger } from '@/utils/logger.js';
 import { BaseExtractor } from './BaseExtractor.js';
@@ -31,6 +32,8 @@ export class InternationalExtractor extends BaseExtractor {
     if (this.isEUDriversLicense(flatLines, format)) {
       this.extractEUDriversLicenseData(flatLines, ocrData, format);
       ocrData.issuing_country = country;
+      // UK DL: cross-check DOB against the licence number (deterministic, non-gating)
+      applyUkDlCrossCheck(ocrData, country);
       return;
     }
 

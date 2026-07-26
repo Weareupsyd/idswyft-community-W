@@ -7,7 +7,7 @@ import type { OCRProvider, OCRData, CountryDocFormat, LLMProviderConfig, Classif
 import {
   getCountryFormat, getGenericEUFormat, INTERNATIONAL_HEADER_NOISE, STATE_DL_FORMATS,
   findLowConfidenceFields, extractFieldsWithLLM, mergeLLMResults,
-  classifyDocument,
+  classifyDocument, applyUkDlCrossCheck, isLikelyUkDl,
 } from '@idswyft/shared';
 import { logger } from '@/utils/logger.js';
 
@@ -332,7 +332,14 @@ export class PaddleOCRProvider implements OCRProvider {
     }
 
     // Country-aware routing: use international extraction for non-US countries
-    const country = issuingCountry?.toUpperCase();
+    let country = issuingCountry?.toUpperCase();
+    // UK driving licences have no MRZ, so the country can't be auto-detected from a
+    // checksum. When the caller supplies none, detect a UK DL from the text and route
+    // to GB so the UK extractor runs instead of the default (US) path.
+    if (!country && isLikelyUkDl(result.text)) {
+      country = 'GB';
+      logger.info('Auto-detected UK driving licence (no issuing country supplied)');
+    }
     const countryFormat = country ? getCountryFormat(country, resolvedDocType) : null;
 
     // Countries absent from the registry previously fell through to the US-centric
@@ -349,6 +356,8 @@ export class PaddleOCRProvider implements OCRProvider {
         });
       }
       this.extractInternationalDocument(result.lines, ocrData, effectiveFormat, country);
+      // UK DL: cross-check DOB against the licence number (deterministic, non-gating)
+      applyUkDlCrossCheck(ocrData, country);
     } else {
       // Default extraction (US or unknown country)
       switch (resolvedDocType) {

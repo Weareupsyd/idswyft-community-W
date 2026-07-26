@@ -5,6 +5,36 @@ All notable changes to the Idswyft Main API are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.19] - 2026-07-26
+
+UK (DVLA) driving-licence recognition — deterministic extraction hardening so UK
+licences read correctly even when no issuing country is supplied. Validated 5/5 on
+real cards via the OCR benchmark harness.
+
+### Added
+- **UK DVLA licence-number decoder** (`shared`): deterministically decodes the date
+  of birth and sex encoded in the 16-char DVLA number, and exposes the surname
+  prefix, forename initials, and card serial. Pure functions, fully unit-tested.
+- **GB driving-licence format**: DVLA number regex (9-padded surname + trailing
+  issue number tolerated) and UK/EU numbered-field labels (1 surname · 2 forenames
+  · 3 DOB · 4b expiry · 4c authority · 5 licence no · 8 address).
+- **Auto-detection of UK driving licences**: UK DLs have no MRZ, so when no issuing
+  country is supplied the engine detects a DVLA licence number (or the "DVLA"
+  marker) in the OCR text and routes to the GB extractor instead of the US path.
+- **Tracked OCR benchmark harness** (`engine/scripts/ocr-benchmark`): measures
+  field-extraction accuracy against real cards; images stay gitignored.
+
+### Fixed
+- **UK DL DOB/sex cross-check** wired into both the engine and backend extractors —
+  fills or confirms the DOB from the licence number (deterministic, non-gating).
+- **Licence-number recovery + normalization**: recovers field 5 from raw OCR text
+  when the numbered-field parser mis-attributes it, and normalizes to the canonical
+  16-char form (issue number stripped).
+- **Expiry recovery** when OCR garbles the "4b" label — the latest non-DOB date on
+  the card is used as the expiry.
+- **Shared build**: exclude test files from `tsc` so the shared package (and the
+  engine Docker image) builds cleanly.
+
 ## [1.12.18] - 2026-07-26
 
 EU / MRZ document extraction fixes — community contribution from @ClausSBG

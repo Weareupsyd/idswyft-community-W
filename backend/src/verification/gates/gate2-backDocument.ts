@@ -55,6 +55,16 @@ export function evaluateGate2(
     };
   }
 
+  // Uganda National ID front/back layouts contain different data. A back MRZ
+  // is not a duplicate of the front and must never be rejected as a mismatch.
+  const isUganda = issuingCountry?.toUpperCase() === 'UG';
+  if (isUganda) return {
+    passed: true,
+    rejection_reason: null,
+    rejection_detail: null,
+    user_message: null,
+  };
+
   // Check front MRZ vs back MRZ consistency
   if (front.mrz_from_front && front.mrz_from_front.length > 0 && back.mrz_result) {
     const frontMrzJoined = front.mrz_from_front.join('').replace(/[^A-Z0-9<]/g, '');

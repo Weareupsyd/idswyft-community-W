@@ -97,6 +97,19 @@ export function getGenericEUFormat(documentType: string): CountryDocFormat | nul
 // --- Registry -----------------------------------------------------
 
 export const INTERNATIONAL_ID_FORMATS: Record<string, CountryIdFormat> = {
+  // -- Uganda -----------------------------------------------------
+  UG: {
+    country: 'UG',
+    document_types: [{
+      type: 'national_id',
+      // NINs are alpha-numeric (typically 14 characters); card numbers are numeric.
+      id_number_regex: /^[A-Z0-9]{8,20}$/i,
+      field_labels: UGANDA_NATIONAL_ID_LABELS,
+      date_format: 'DMY',
+      has_mrz: true,
+    }],
+  },
+
   // -- English-speaking ------------------------------------------
 
   GB: {

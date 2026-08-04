@@ -16,11 +16,12 @@ set -euo pipefail
 #   git clone https://github.com/team-idswyft/idswyft-community.git && cd idswyft-community && ./install.sh
 #
 # Options:
-#   --build    Build images from source instead of pulling pre-built images
+#   --prebuilt Use pre-built images instead of building from source
 # ─────────────────────────────────────────────────
 
 REPO_URL="https://github.com/team-idswyft/idswyft-community.git"
-BUILD_FROM_SOURCE=false
+# Source builds are the default so local changes and the latest source are installed.
+BUILD_FROM_SOURCE=true
 ENABLE_HTTPS=false
 ENABLE_AUTOUPDATE=false
 USE_EXTERNAL_DB=false
@@ -30,6 +31,17 @@ USE_S3_STORAGE=false
 for arg in "$@"; do
   case "$arg" in
     --build) BUILD_FROM_SOURCE=true ;;
+    --prebuilt) BUILD_FROM_SOURCE=false ;;
+    --help|-h)
+      echo "Usage: $0 [--prebuilt]"
+      echo "  (default) Build Docker images from the checked-out source"
+      echo "  --prebuilt Pull published pre-built images instead"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg (use --help for usage)" >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -650,7 +662,7 @@ start_services() {
     step "Building containers from source"
     divider
     info "Building locally — this may take 15-30 minutes on first run"
-    info "Tip: next time, omit --build to pull pre-built images (~2 min)"
+    info "Building from source is the default; use --prebuilt to pull published images"
     echo -e "  ${GRAY}│${RESET}"
 
     local build_log

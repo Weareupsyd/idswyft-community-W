@@ -1608,6 +1608,43 @@ export class PaddleOCRProvider implements OCRProvider {
     });
   }
 
+  /** Extract the Uganda National ID front layout. The back contains address and
+   * biometric fields, so it is intentionally not used for identity comparison. */
+  private extractUgandaNationalIdData(flatLines: RecognitionResult[], ocrData: OCRData): void {
+    const set = (key: string, value: string, confidence: number) => {
+      if (value) {
+        (ocrData as any)[key] = value.trim();
+        ocrData.confidence_scores![key] = confidence;
+      }
+    };
+    this.findField(flatLines, [/surname/i], (v, c) => set('surname', v, c));
+    this.findField(flatLines, [/given\s*names?/i, /first\s*name/i], (v, c) => set('given_names', v, c));
+    this.findField(flatLines, [/full\s*name/i], (v, c) => set('full_name', v, c));
+    this.findDateField(flatLines, [/date\s*of\s*birth/i, /dob/i], (v, c) => set('date_of_birth', v, c));
+    this.findDateField(flatLines, [/date\s*of\s*issue/i, /issued/i], (v, c) => set('date_of_issue', v, c));
+    this.findDateField(flatLines, [/date\s*of\s*expiry/i, /expiry/i, /expires/i], (v, c) => {
+      const normalized = disambiguateExpiryDate(v); set('date_of_expiry', normalized, c);
+      ocrData.expiration_date = normalized;
+    });
+    this.findField(flatLines, [/\bNIN\b/i, /national\s*identification\s*(?:number|no)/i], (v, c) => {
+      const value = v.replace(/\s+/g, '').toUpperCase();
+      if (/^[A-Z0-9]{8,20}$/.test(value)) { set('nin', value, c); ocrData.document_number = value; }
+    });
+    this.findField(flatLines, [/card\s*(?:number|no)/i], (v, c) => {
+      const value = v.replace(/\s+/g, '');
+      if (/^[A-Z0-9]{6,15}$/i.test(value)) set('card_number', value, c);
+    });
+    this.findField(flatLines, [/nationality/i], (v, c) => set('nationality', v, c));
+    this.findField(flatLines, [/place\s*of\s*birth/i], (v, c) => set('place_of_birth', v, c));
+    this.findField(flatLines, [/\bsex\b/i], (v, c) => {
+      const m = v.match(/\b([MF])\b/i); if (m) set('sex', m[1].toUpperCase(), c);
+    });
+    if (!ocrData.full_name && (ocrData.surname || ocrData.given_names)) {
+      ocrData.full_name = [ocrData.surname, ocrData.given_names].filter(Boolean).join(' ');
+      ocrData.name = ocrData.full_name;
+    } else if (ocrData.full_name) ocrData.name = ocrData.full_name;
+  }
+
   /**
    * International document extraction using country-specific format registry.
    * Uses localized field labels from the format definition.
@@ -1627,6 +1664,15 @@ export class PaddleOCRProvider implements OCRProvider {
       dateFormat: format.date_format,
       lineCount: flatLines.length,
     });
+
+    // Uganda National IDs have a non-EU layout and deliberately keep different
+    // fields on the two sides. Extract the front fields without requiring the
+    // back to repeat them.
+    if (country === 'UG' && format.type === 'national_id') {
+      this.extractUgandaNationalIdData(flatLines, ocrData);
+      ocrData.issuing_country = country;
+      return;
+    }
 
     // EU DL numbered-field format: use specialized parser
     if (this.isEUDriversLicense(flatLines, format)) {

@@ -78,6 +78,20 @@ export function crossValidate(
 ): CrossValidationResult {
   const frontOcr = front.ocr as Record<string, unknown>;
   const backPayload = (back.qr_payload || {}) as Record<string, unknown>;
+  const issuingCountry = String(frontOcr.issuing_country || '').toUpperCase();
+
+  // Uganda National IDs intentionally have different fields on each side. Do
+  // not compare the front identity fields with the back address/biometrics.
+  // Expiry is still evaluated by the normal session gates.
+  if (issuingCountry === 'UG') {
+    return {
+      overall_score: 1,
+      field_scores: {},
+      has_critical_failure: false,
+      document_expired: false,
+      verdict: 'PASS',
+    };
+  }
 
   // If barcode returned all-empty fields, we can't cross-validate.
   // Flag for REVIEW so a human inspects — unreadable barcode should NOT auto-pass.
@@ -148,10 +162,10 @@ export function crossValidate(
 
   // ── DL Number Format Validation (weight 0 — supplementary signal) ──
   const frontIdNumber = extractFrontField(frontOcr, 'id_number');
-  const issuingCountry = (frontOcr.issuing_country as string) || null;
+  const issuingCountryForDl = (frontOcr.issuing_country as string) || null;
   // Try to detect issuing state from address or other OCR fields
   const issuingState = (frontOcr.issuing_state as string) || null;
-  const dlValidation: DlValidationResult = validateDlNumber(frontIdNumber, issuingCountry, issuingState);
+  const dlValidation: DlValidationResult = validateDlNumber(frontIdNumber, issuingCountryForDl, issuingState);
 
   if (dlValidation.verdict !== 'SKIP') {
     const dlIcon = dlValidation.verdict === 'PASS' ? '✅' : dlValidation.verdict === 'FAIL' ? '⚠️' : '🔍';

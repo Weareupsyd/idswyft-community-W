@@ -48,9 +48,11 @@ function masterKeyCandidates(): string[] {
 export class StorageService {
   private generateSecureFileName(originalName: string, verificationId: string): string {
     const timestamp = Date.now();
-    const random = crypto.randomBytes(8).toString('hex');
-    const extension = path.extname(originalName);
-    return `${verificationId}_${timestamp}_${random}${extension}`;
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const random = crypto.randomBytes(4).toString('hex');
+    const extension = path.extname(originalName) || '.jpg';
+    const baseName = path.basename(originalName, extension).replace(/[^a-zA-Z0-9_\-]/g, '_');
+    return `${verificationId}_v${timestamp}_${isoDate}_processed_${baseName}_${random}${extension}`;
   }
 
   private async ensureDirectoryExists(dirPath: string): Promise<void> {

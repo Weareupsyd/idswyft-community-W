@@ -73,6 +73,14 @@ export function evaluateGate1(front: FrontExtractionResult): GateResult {
       passed: false,
       rejection_reason: 'FRONT_OCR_FAILED',
       rejection_detail: 'No required OCR fields could be read from the document',
+      rejection_breakdown: {
+        category: 'document_quality',
+        summary: 'Front document image quality is insufficient for OCR reading',
+        details: [
+          'Zero required OCR fields could be parsed from the document image',
+          `Missing fields: ${missingFields.join(', ')}`,
+        ],
+      },
       user_message: 'We could not read your ID. Please retake the photo with the full document visible in good lighting.',
     };
   }
@@ -95,6 +103,19 @@ export function evaluateGate1(front: FrontExtractionResult): GateResult {
       passed: false,
       rejection_reason: 'FRONT_LOW_CONFIDENCE',
       rejection_detail: `OCR confidence ${front.ocr_confidence.toFixed(2)} is below minimum ${VERIFICATION_THRESHOLDS.OCR_CONFIDENCE.minimum_acceptable}`,
+      rejection_breakdown: {
+        category: 'document_quality',
+        summary: 'OCR confidence score is below the required quality threshold',
+        score_details: {
+          required_threshold: VERIFICATION_THRESHOLDS.OCR_CONFIDENCE.minimum_acceptable,
+          actual_score: Math.round(front.ocr_confidence * 100) / 100,
+          metric_name: 'ocr_confidence',
+        },
+        details: [
+          `OCR confidence score of ${(front.ocr_confidence * 100).toFixed(1)}% is below minimum required ${VERIFICATION_THRESHOLDS.OCR_CONFIDENCE.minimum_acceptable * 100}% threshold`,
+          'Image may be blurry, poorly lit, or partially obscured',
+        ],
+      },
       user_message: 'The photo of your ID is not clear enough. Please retake it in good lighting with the full document visible.',
     };
   }

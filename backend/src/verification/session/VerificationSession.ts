@@ -32,6 +32,7 @@ import type {
   AgeEstimationResult,
   VelocityAnalysisResult,
   GeoAnalysisResult,
+  RejectionBreakdown,
 } from '@idswyft/shared';
 
 /**
@@ -43,7 +44,7 @@ export const SESSION_PROTOCOL_ID = '6964737779667420627920646f6f626565';
 import { evaluateGate1 } from '../gates/gate1-frontDocument.js';
 import { evaluateGate2 } from '../gates/gate2-backDocument.js';
 import { evaluateGate3 } from '../gates/gate3-crossValidation.js';
-import { evaluateGate4 } from '../gates/gate4-liveCapture.js';
+import { evaluateGate4, DEFAULT_LIVENESS_THRESHOLD } from '../gates/gate4-liveCapture.js';
 import { evaluateGate5 } from '../gates/gate5-faceMatch.js';
 import { evaluateGate6 } from '../gates/gate6-amlScreening.js';
 import { evaluateGate7 } from '../gates/gate7-voiceMatch.js';
@@ -55,6 +56,7 @@ export interface StepResult {
   passed: boolean;
   rejection_reason: string | null;
   rejection_detail: string | null;
+  rejection_breakdown?: RejectionBreakdown | null;
   user_message: string | null;
 }
 
@@ -71,6 +73,8 @@ export interface SessionDeps {
   processLiveCapture: (buffer: Buffer) => Promise<LiveCaptureResult>;
   computeFaceMatch: (idEmbedding: number[], liveEmbedding: number[], threshold: number) => FaceMatchResult;
   faceMatchThreshold?: number;
+  /** Liveness anti-spoofing threshold (0.75 production, 0.65 sandbox) */
+  livenessThreshold?: number;
   /** Optional AML screening — returns null if disabled */
   screenAML?: (fullName: string, dob?: string | null, nationality?: string | null) => Promise<AMLScreeningResult | null>;
   /** Whether voice authentication is enabled for this developer */
@@ -90,7 +94,14 @@ export interface SessionHydration {
   back_extraction?: BackExtractionResult | null;
   cross_validation?: CrossValidationResult | null;
   face_match?: FaceMatchResult | null;
-  liveness?: { passed: boolean; score: number } | null;
+  liveness?: {
+    passed: boolean;
+    score: number;
+    threshold?: number;
+    provider?: string;
+    mode?: 'passive' | 'head_turn';
+    signals?: Array<{ key: string; label: string; score: number; weight: number; note?: string }>;
+  } | null;
   deepfake_check?: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening?: {
     risk_level: string;
@@ -205,11 +216,17 @@ export class VerificationSession {
     if (!dobStr) {
       this.state.rejection_reason = 'DOB_NOT_FOUND' as any;
       this.state.rejection_detail = 'Date of birth could not be extracted from document';
+      this.state.rejection_breakdown = {
+        category: 'document_quality',
+        summary: 'Date of birth was missing or unreadable on the uploaded document',
+        details: ['OCR could not extract a valid date of birth from the front ID photo'],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'DOB_NOT_FOUND',
         rejection_detail: 'Date of birth could not be extracted from document',
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: 'We could not read the date of birth on your document. Please try again with a clearer image.',
       };
     }
@@ -219,11 +236,17 @@ export class VerificationSession {
     if (!dob) {
       this.state.rejection_reason = 'DOB_NOT_FOUND' as any;
       this.state.rejection_detail = `Date of birth format unrecognized: ${dobStr}`;
+      this.state.rejection_breakdown = {
+        category: 'document_quality',
+        summary: 'Date of birth format on document was unrecognized',
+        details: [`Raw date string "${dobStr}" could not be parsed as a valid date`],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'DOB_NOT_FOUND',
         rejection_detail: `Date of birth format unrecognized: ${dobStr}`,
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: 'We could not parse the date of birth on your document. Please try again with a clearer image.',
       };
     }
@@ -239,11 +262,22 @@ export class VerificationSession {
     if (!isOfAge) {
       this.state.rejection_reason = 'UNDERAGE' as any;
       this.state.rejection_detail = `Subject does not meet the minimum age requirement of ${ageThreshold}`;
+      this.state.rejection_breakdown = {
+        category: 'underage',
+        summary: 'Subject does not meet minimum age requirement',
+        score_details: {
+          required_threshold: ageThreshold,
+          actual_score: age,
+          metric_name: 'calculated_age',
+        },
+        details: [`Calculated age ${age} is below the required threshold of ${ageThreshold}`],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'UNDERAGE',
         rejection_detail: `Subject does not meet the minimum age requirement of ${ageThreshold}`,
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: `You must be at least ${ageThreshold} years old to proceed.`,
         age_verification: ageVerification,
       };
@@ -275,6 +309,17 @@ export class VerificationSession {
 
     this.state.back_extraction = backResult;
 
+    // Merge extracted back details into session OCR data so all fields from front AND back are combined
+    if (backResult.qr_payload && this.state.front_extraction?.ocr) {
+      for (const [key, val] of Object.entries(backResult.qr_payload)) {
+        if (val && typeof val === 'string' && val.trim().length > 0) {
+          if (!this.state.front_extraction.ocr[key]) {
+            this.state.front_extraction.ocr[key] = val;
+          }
+        }
+      }
+    }
+
     // Auto-trigger Step 3: Cross-Validation
     this.transition(VerificationStatus.CROSS_VALIDATING);
     const crossValResult = crossValidate(this.state.front_extraction!, backResult);
@@ -301,12 +346,31 @@ export class VerificationSession {
    * Must be called when current_step === AWAITING_LIVE.
    * Auto-triggers Step 5 (face match) if Gate 4 passes.
    */
-  async submitLiveCapture(imageBuffer: Buffer): Promise<StepResult> {
+  async submitLiveCapture(imageBuffer: Buffer, livenessThreshold?: number): Promise<StepResult> {
     this.assertStep(VerificationStatus.AWAITING_LIVE);
     this.transition(VerificationStatus.LIVE_PROCESSING);
 
     const liveResult = await this.deps.processLiveCapture(imageBuffer);
-    const gate4 = evaluateGate4(liveResult);
+
+    // Record the liveness result BEFORE running Gate4 so that on failure the
+    // score/threshold are still persisted for the UI/response to show. Prior
+    // to this, a LIVENESS_FAILED hard-reject discarded the score and the
+    // dashboard showed "Liveness: Not completed" even though a selfie WAS
+    // processed and rejected.
+    this.state.liveness = {
+      passed: liveResult.liveness_passed,
+      score: liveResult.liveness_score,
+      threshold: (liveResult as any).liveness_threshold,
+      provider: (liveResult as any).liveness_provider,
+      mode: (liveResult as any).liveness_mode,
+      signals: (liveResult as any).liveness_signals,
+    };
+    this.state.deepfake_check = liveResult.deepfake_check ?? null;
+
+    const effectiveLivenessThreshold = livenessThreshold
+      ?? this.deps.livenessThreshold
+      ?? DEFAULT_LIVENESS_THRESHOLD;
+    const gate4 = evaluateGate4(liveResult, effectiveLivenessThreshold);
 
     if (!gate4.passed) {
       return this.hardReject(gate4);
@@ -347,11 +411,8 @@ export class VerificationSession {
       );
     }
     this.state.face_match = faceMatchResult;
-    this.state.liveness = {
-      passed: liveResult.liveness_passed,
-      score: liveResult.liveness_score,
-    };
-    this.state.deepfake_check = liveResult.deepfake_check ?? null;
+    // liveness + deepfake were already recorded above before Gate4 evaluation
+    // so that failed runs still surface their score/signals to the UI.
 
     const gate5 = evaluateGate5(faceMatchResult);
     if (!gate5.passed) {
@@ -455,6 +516,7 @@ export class VerificationSession {
   private hardReject(gate: GateResult): StepResult {
     this.state.rejection_reason = gate.rejection_reason as any;
     this.state.rejection_detail = gate.rejection_detail;
+    this.state.rejection_breakdown = gate.rejection_breakdown ?? null;
     this.transition(VerificationStatus.HARD_REJECTED);
     return {
       passed: false,

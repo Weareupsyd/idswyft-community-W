@@ -55,7 +55,7 @@ const DemoPage: React.FC = () => {
   const [_uploadProgress, setUploadProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [documentType, setDocumentType] = useState<string>('');
+  const [documentType, setDocumentType] = useState<string>('national_id');
   const [backFile, setBackFile] = useState<File | null>(null);
   const [backPreviewUrl, setBackPreviewUrl] = useState<string | null>(null);
   const [checkingStepError, setCheckingStepError] = useState<string | null>(null);

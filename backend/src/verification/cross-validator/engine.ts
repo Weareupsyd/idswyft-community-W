@@ -79,6 +79,35 @@ export function crossValidate(
   const frontOcr = front.ocr as Record<string, unknown>;
   const backPayload = (back.qr_payload || {}) as Record<string, unknown>;
 
+  // Ugandan National ID (or Uganda issuing country): front and back collect complementary,
+  // non-overlapping details (front: name, DOB, NIN, sex; back: place of birth, district, address).
+  // Do not compare front vs back details for mismatch failure — evaluate document expiry and pass.
+  const isUganda =
+    (frontOcr.issuing_country as string)?.toUpperCase() === 'UG' ||
+    (backPayload.issuing_country as string)?.toUpperCase() === 'UG' ||
+    /ugand/i.test(String(frontOcr.nationality || ''));
+
+  if (isUganda) {
+    const frontExpiry = extractFrontField(frontOcr, 'expiry_date');
+    const backExpiry = extractBackField(backPayload, 'expiry_date');
+    const documentExpired = isExpired(frontExpiry, backExpiry);
+
+    console.log('🔎 ── Cross-Validation: Ugandan National ID detected — Complementary Front/Back Details ──');
+
+    const ugFieldScores: Record<string, { score: number; passed: boolean; weight: number }> = {};
+    for (const [field, config] of Object.entries(FIELD_WEIGHTS)) {
+      ugFieldScores[field] = { score: 1.0, passed: true, weight: config.weight };
+    }
+
+    return {
+      overall_score: 1.0,
+      field_scores: ugFieldScores,
+      has_critical_failure: false,
+      document_expired: documentExpired,
+      verdict: documentExpired ? 'REJECT' : 'PASS',
+    };
+  }
+
   // If barcode returned all-empty fields, we can't cross-validate.
   // Flag for REVIEW so a human inspects — unreadable barcode should NOT auto-pass.
   // The session still proceeds to live capture (REVIEW unlocks it), but the

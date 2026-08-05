@@ -958,7 +958,47 @@ const EndUserVerification: React.FC<VerificationProps> = ({
               </p>
             </div>
 
-            {/* Score details */}
+              {/* Rejection Breakdown (Segmented details) */}
+              {finalResult.rejection_breakdown && (
+                <div style={{
+                  padding: 12, borderRadius: 6, background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)', marginBottom: 16, textAlign: 'left',
+                }}>
+                  <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: '#ef4444', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>
+                    Rejection Category: {finalResult.rejection_breakdown.category}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+                    {finalResult.rejection_breakdown.summary}
+                  </div>
+                  {finalResult.rejection_breakdown.field_mismatches && finalResult.rejection_breakdown.field_mismatches.length > 0 && (
+                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(239,68,68,0.2)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>Field Mismatches:</div>
+                      {finalResult.rejection_breakdown.field_mismatches.map((fm: any, idx: number) => (
+                        <div key={idx} style={{ fontSize: 12, color: 'var(--mid)', marginBottom: 2 }}>
+                          • <strong>{fm.field}:</strong> {fm.reason}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Extracted ID Face */}
+              {(finalResult.id_face_base64 || finalResult.ocr_data?.id_face_base64) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 16 }}>
+                  <img
+                    src={finalResult.id_face_base64 || finalResult.ocr_data?.id_face_base64}
+                    alt="ID Face"
+                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 4 }}
+                  />
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>Cropped Face from ID</div>
+                    <div style={{ fontSize: 11, color: 'var(--mid)', marginTop: 2 }}>Biometric ID face photo</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Score details */}
             <div className="result-grid text-left">
               <div>Status</div>
               <div>

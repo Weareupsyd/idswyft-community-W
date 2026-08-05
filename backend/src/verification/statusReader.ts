@@ -175,7 +175,8 @@ export function buildVerificationResponse(input: VerificationResponseInput) {
     ...((state as any).age_verification && { age_verification: (state as any).age_verification }),
     front_document_uploaded: !!state.front_extraction,
     back_document_uploaded: !!state.back_extraction,
-    live_capture_uploaded: !!state.face_match,
+    // true once a selfie has been processed (whether it passed liveness or not)
+    live_capture_uploaded: !!state.liveness,
     ocr_data: isAgeOnly ? undefined : (state.front_extraction?.ocr ?? null),
     barcode_data: state.back_extraction?.qr_payload ?? null,
     cross_validation_results: state.cross_validation ?? null,
@@ -199,6 +200,9 @@ export function buildVerificationResponse(input: VerificationResponseInput) {
       : mapped.final_result,
     rejection_reason: state.rejection_reason,
     rejection_detail: state.rejection_detail,
+    rejection_breakdown: state.rejection_breakdown ?? null,
+    id_face_base64: state.front_extraction?.id_face_base64 ?? null,
+    id_face_full_base64: (state.front_extraction as any)?.id_face_full_base64 ?? null,
     failure_reason: state.rejection_detail,
     manual_review_reason: verification.manual_review_reason
       || (state.cross_validation?.verdict === 'REVIEW' ? 'Cross-validation requires review' : null)

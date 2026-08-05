@@ -18,7 +18,7 @@ const MRZ_LINE = /^[A-Z0-9<]{30,44}$/;
 // Keyword patterns
 const PASSPORT_KW = /PASSPORT/;
 const DL_KW = /DRIVER'?S?\s*(LIC|LICENSE|LICENCE)|DEPARTMENT\s+OF\s+MOTOR|\bDMV\b/;
-const NID_KW = /NATIONAL\s*ID|IDENTITY\s*CARD|CARTE\s*D'IDENTIT/;
+const NID_KW = /NATIONAL\s*ID|IDENTITY\s*CARD|CARTE\s*D'IDENTIT|REPUBLIC\s*OF\s*UGANDA|\bUGANDA\b|\bNIN\b|\bNIRA\b/;
 
 // AAMVA field codes commonly found in US driver's license OCR text
 const AAMVA_CODES = ['DCS', 'DAC', 'DAD', 'DAQ', 'DBB', 'DBA', 'DAG', 'DAJ', 'DAK'];
@@ -102,5 +102,5 @@ export function classifyDocument(rawText: string): ClassificationResult {
 
   // ── 4. Default fallback ───────────────────────────────────────
   signals.push('default_fallback');
-  return { type: 'drivers_license', confidence: 0.50, signals };
+  return { type: 'national_id', confidence: 0.50, signals };
 }

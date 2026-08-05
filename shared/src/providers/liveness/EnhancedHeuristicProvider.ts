@@ -1,4 +1,4 @@
-import { LivenessProvider } from '../types.js';
+import { LivenessProvider, LivenessAssessment, LivenessSignal } from '../types.js';
 import { logger } from '@/utils/logger.js';
 
 /**
@@ -8,29 +8,52 @@ import { logger } from '@/utils/logger.js';
  * real camera photos from screenshots, printed photos, and digital fakes.
  * Each signal produces a sub-score (0-1) that is combined via weighted average.
  *
+ * Tuning notes (2026-08): this scorer was originally calibrated against native
+ * camera JPEGs saved directly to disk, where missing EXIF and libjpeg quant
+ * tables were strong spoof indicators. In practice the demo + hosted-verification
+ * flows capture selfies via getUserMedia() → <canvas> → canvas.toBlob('image/jpeg'),
+ * which strips EXIF and re-encodes with browser libjpeg tables even when the
+ * source is a live webcam — so missing EXIF / generic quant tables are NOT
+ * reliable spoof signals from the browser. Weights below reflect that reality:
+ * moiré, double-compression artifacts, color bimodality and entropy carry the
+ * load, while EXIF is treated as a bonus (not a penalty), file size is lenient,
+ * and aspect ratio is nearly informational.
+ *
  * Signals:
  *  1. File size heuristic -- screens/prints cluster at specific sizes
  *  2. Byte entropy -- natural photos have entropy > 7.0 bits/byte
  *  3. Pixel variance -- natural texture/lighting variance > 1000
- *  4. EXIF metadata -- real cameras embed focal length, aperture, etc.
- *  5. JPEG compression artifacts -- screen-captured photos have different DCT patterns
+ *  4. EXIF metadata -- bonus when present; neutral (0.5) when absent
+ *  5. JPEG compression artifacts -- double-compression / heavy quant penalty
  *  6. Color histogram analysis -- screens show saturated, bimodal distributions
- *  7. Edge density / moire detection -- re-photographed screens produce moire
- *  8. Aspect ratio check -- camera sensors vs cropped screenshots differ
+ *  7. Edge density / moire detection -- STRONG signal; re-photographed screens
+ *     produce periodic moire patterns that natural photos do not
+ *  8. Aspect ratio check -- loose; informational only
  */
 export class EnhancedHeuristicProvider implements LivenessProvider {
   readonly name = 'enhanced-heuristic';
 
-  /** Signal weights -- sum to 1.0 */
+  /** Signal weights -- sum to 1.0. */
   private readonly weights = {
-    fileSize: 0.08,
-    entropy: 0.12,
+    fileSize: 0.06,
+    entropy: 0.14,
     pixelVariance: 0.10,
-    exif: 0.20,
-    jpegArtifacts: 0.15,
-    colorHistogram: 0.15,
-    edgeDensity: 0.10,
-    aspectRatio: 0.10,
+    exif: 0.05,       // bonus-only; treat absence as neutral
+    jpegArtifacts: 0.18,
+    colorHistogram: 0.18,
+    edgeDensity: 0.24, // moire/edge analysis — strongest spoof signal
+    aspectRatio: 0.05,
+  };
+
+  private readonly signalLabels: Record<string, string> = {
+    fileSize: 'File size',
+    entropy: 'Byte entropy',
+    pixelVariance: 'Pixel variance',
+    exif: 'Camera EXIF',
+    jpegArtifacts: 'JPEG compression',
+    colorHistogram: 'Color distribution',
+    edgeDensity: 'Edge density / moiré',
+    aspectRatio: 'Aspect ratio',
   };
 
   async assessLiveness(imageData: {
@@ -39,11 +62,20 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
     height?: number;
     pixelData?: number[];
   }): Promise<number> {
+    return (await this.assessLivenessDetailed(imageData)).score;
+  }
+
+  async assessLivenessDetailed(imageData: {
+    buffer: Buffer;
+    width?: number;
+    height?: number;
+    pixelData?: number[];
+  }): Promise<LivenessAssessment> {
     const { buffer, width, height, pixelData } = imageData;
 
     if (!buffer || buffer.length === 0) {
       logger.warn('EnhancedHeuristicProvider: empty buffer');
-      return 0;
+      return { score: 0, signals: [] };
     }
 
     // If dimensions not provided, try to extract from buffer metadata
@@ -70,6 +102,7 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       colorScore,
       edgeScore,
       aspectScore,
+      metaResolved,
     ] = await Promise.all([
       this.scoreFileSize(buffer),
       this.scoreEntropy(buffer),
@@ -79,9 +112,10 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       this.scoreColorHistogram(buffer),
       this.scoreEdgeDensity(buffer),
       this.scoreAspectRatio(buffer, resolvedWidth, resolvedHeight),
+      this.readMetaForNotes(buffer).catch(() => null),
     ]);
 
-    const signals = {
+    const scoreMap: Record<string, number> = {
       fileSize: fileSizeScore,
       entropy: entropyScore,
       pixelVariance: pixelVarianceScore,
@@ -92,23 +126,61 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       aspectRatio: aspectScore,
     };
 
+    // Build per-signal notes
+    const notes: Record<string, string | undefined> = {};
+    const sizeKb = buffer.length / 1024;
+    notes.fileSize = `${sizeKb.toFixed(1)} KB`;
+    if (metaResolved?.hasExif) notes.exif = 'Camera EXIF present';
+    else notes.exif = 'No EXIF metadata (normal for browser canvas)';
+    if (metaResolved?.format) notes.exif = `${notes.exif} · ${metaResolved.format.toUpperCase()}`;
+    if (metaResolved?.width && metaResolved?.height) {
+      notes.aspectRatio = `${metaResolved.width}×${metaResolved.height}`;
+    }
+    if (edgeScore < 0.4) notes.edgeDensity = 'Moiré / periodic pattern detected';
+    else if (edgeScore < 0.6) notes.edgeDensity = 'Some periodic noise';
+    if (jpegScore < 0.5) notes.jpegArtifacts = 'Heavy JPEG re-compression';
+    if (colorScore < 0.5) notes.colorHistogram = 'Bimodal / synthetic color distribution';
+    if (entropyScore < 0.5) notes.entropy = 'Low entropy (flat or synthetic)';
+
+    const signals: LivenessSignal[] = Object.entries(scoreMap).map(([key, score]) => ({
+      key,
+      label: this.signalLabels[key] ?? key,
+      score: Math.max(0, Math.min(1, score)),
+      weight: this.weights[key as keyof typeof this.weights] ?? 0,
+      note: notes[key],
+    }));
+
     // Weighted average
     let weightedSum = 0;
     let totalWeight = 0;
-    for (const [key, score] of Object.entries(signals)) {
-      const weight = this.weights[key as keyof typeof this.weights];
-      weightedSum += score * weight;
-      totalWeight += weight;
+    for (const s of signals) {
+      weightedSum += s.score * s.weight;
+      totalWeight += s.weight;
     }
 
-    const finalScore = Math.max(0, Math.min(1, weightedSum / totalWeight));
+    const finalScore = Math.max(0, Math.min(1, totalWeight > 0 ? weightedSum / totalWeight : 0));
 
     logger.info('EnhancedHeuristicProvider: liveness assessment', {
-      signals,
+      signals: Object.fromEntries(signals.map(s => [s.key, +s.score.toFixed(3)])),
       finalScore: finalScore.toFixed(3),
     });
 
-    return finalScore;
+    return { score: finalScore, signals };
+  }
+
+  private async readMetaForNotes(buffer: Buffer): Promise<{ format?: string; width?: number; height?: number; hasExif: boolean } | null> {
+    try {
+      const sharp = (await import('sharp')).default;
+      const meta = await sharp(buffer).metadata();
+      return {
+        format: meta.format,
+        width: meta.width,
+        height: meta.height,
+        hasExif: !!meta.exif,
+      };
+    } catch {
+      return null;
+    }
   }
 
   // -- Signal 1: File Size ------------------------------------------
@@ -116,17 +188,15 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
   private async scoreFileSize(buffer: Buffer): Promise<number> {
     const sizeKb = buffer.length / 1024;
 
-    // Tiny images are almost certainly not real camera photos
-    if (sizeKb < 5) return 0.1;
-    if (sizeKb < 15) return 0.3;
-    // Screenshots tend to be 20-100KB for faces
-    if (sizeKb < 30) return 0.5;
-    // Real camera photos are typically 50KB-5MB
-    if (sizeKb < 100) return 0.6;
-    if (sizeKb < 500) return 0.75;
-    if (sizeKb < 3000) return 0.9;
-    // Very large files are consistent with high-res camera photos
-    return 0.85;
+    // Browser canvas.toBlob('image/jpeg', 0.8) for a cropped face viewfinder
+    // commonly lands in the 15–90 KB range. Don't treat that as a spoof signal.
+    if (sizeKb < 5) return 0.15;      // tiny thumbnail/icon
+    if (sizeKb < 12) return 0.45;     // very heavily compressed
+    if (sizeKb < 200) return 0.80;    // normal canvas selfie or native camera thumbnail
+    if (sizeKb < 800) return 0.90;    // full-frame webcam / mid-res camera
+    if (sizeKb < 3000) return 0.85;   // original camera JPEG
+    if (sizeKb < 8000) return 0.75;   // very large raw capture
+    return 0.65;                      // absurdly large (suspicious)
   }
 
   // -- Signal 2: Byte Entropy ---------------------------------------
@@ -166,48 +236,29 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
 
   private async scoreExifMetadata(buffer: Buffer): Promise<number> {
     try {
-      // Dynamic import -- sharp is an optional dependency
       const sharp = (await import('sharp')).default;
       const metadata = await sharp(buffer).metadata();
 
-      let score = 0.3; // Base: no EXIF = suspicious
+      // EXIF is a BONUS signal, not a penalty. Browser canvas.toBlob
+      // intentionally strips EXIF (privacy), so its absence is neutral.
+      // Start at 0.5 (neutral) and add small bonuses for known camera tags.
+      let score = 0.5;
 
-      // Camera photos have these EXIF fields; screenshots don't
       if (metadata.exif) {
-        score += 0.15; // Has EXIF block at all
+        score += 0.10;
 
-        // Parse EXIF buffer for camera-specific tags
         const exifStr = metadata.exif.toString('binary');
 
-        // Focal length -- only set by real cameras
-        if (exifStr.includes('FocalLength') || exifStr.includes('\x92\x0a')) {
-          score += 0.15;
-        }
-
-        // Camera make/model -- strong camera signal
-        if (exifStr.includes('Make') || exifStr.includes('Model')) {
-          score += 0.15;
-        }
-
-        // Exposure time -- cameras set this, editors usually don't
-        if (exifStr.includes('ExposureTime') || exifStr.includes('\x82\x9a')) {
-          score += 0.1;
-        }
-
-        // Flash info
-        if (exifStr.includes('Flash') || exifStr.includes('\x92\x09')) {
-          score += 0.05;
-        }
+        if (exifStr.includes('FocalLength') || exifStr.includes('\x92\x0a')) score += 0.10;
+        if (exifStr.includes('Make') || exifStr.includes('Model'))              score += 0.12;
+        if (exifStr.includes('ExposureTime') || exifStr.includes('\x82\x9a'))   score += 0.08;
+        if (exifStr.includes('Flash') || exifStr.includes('\x92\x09'))          score += 0.05;
       }
 
-      // Orientation tag -- cameras set this for rotation
-      if (metadata.orientation && metadata.orientation > 1) {
-        score += 0.05;
-      }
+      if (metadata.orientation && metadata.orientation > 1) score += 0.05;
 
       return Math.min(1, score);
     } catch {
-      // sharp not available or corrupted image -- return neutral
       return 0.5;
     }
   }
@@ -235,17 +286,19 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
     // Count JPEG markers -- re-saved images sometimes accumulate extra markers
     const markerCount = this.countJpegMarkers(buffer);
 
-    // Camera JPEGs typically have 10-30 markers; heavily processed images have more
+    // Browser canvas encodes produce 5–15 markers; camera JPEGs 8–35; editors
+    // (Photoshop, GIMP, some messenger re-encodes) produce >40. Only the heavy
+    // end is a real spoof signal.
     let markerScore: number;
-    if (markerCount >= 8 && markerCount <= 35) {
-      markerScore = 0.8;
-    } else if (markerCount < 8) {
-      markerScore = 0.5; // Stripped JPEG -- slightly suspicious
+    if (markerCount >= 5 && markerCount <= 40) {
+      markerScore = 0.82;
+    } else if (markerCount < 5) {
+      markerScore = 0.55; // stripped / minimal encoder
     } else {
-      markerScore = 0.4; // Too many markers -- over-processed
+      markerScore = 0.40; // heavy re-processing
     }
 
-    return (quantScore * 0.6 + markerScore * 0.4);
+    return quantScore * 0.65 + markerScore * 0.35;
   }
 
   // -- Signal 6: Color Histogram Analysis ---------------------------
@@ -329,24 +382,24 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
     // Autocorrelation at small lags -- moire produces peaks at regular intervals
     const moireScore = this.detectMoirePattern(sample);
 
-    // Natural photos: moderate edge density, low periodic patterns
     let edgeScore: number;
     if (avgEdge > 80) {
-      edgeScore = 0.3; // Very noisy -- could be moire or over-sharpened
-    } else if (avgEdge > 40) {
-      edgeScore = 0.8; // Natural edge density
-    } else if (avgEdge > 15) {
-      edgeScore = 0.65; // Low edges -- possibly blurry or flat
+      edgeScore = 0.30; // very noisy / over-sharpened
+    } else if (avgEdge > 35) {
+      edgeScore = 0.82; // natural edge density for a face photo
+    } else if (avgEdge > 12) {
+      edgeScore = 0.65; // soft/blurry but plausible
     } else {
-      edgeScore = 0.3; // Very flat -- synthetic or heavily compressed
+      edgeScore = 0.30; // very flat — synthetic or extremely compressed
     }
 
-    // Penalize if moire detected
-    if (moireScore > 0.6) {
-      edgeScore -= 0.2;
-    }
+    // Moire is the strongest screen-rephoto signal — apply a decisive penalty
+    // but leave a tiny floor so a single spurious peak doesn't zero the score.
+    if (moireScore >= 0.9) edgeScore = Math.min(edgeScore, 0.10);
+    else if (moireScore >= 0.6) edgeScore -= 0.30;
+    else if (moireScore >= 0.3) edgeScore -= 0.10;
 
-    return Math.max(0, Math.min(1, edgeScore));
+    return Math.max(0.05, Math.min(1, edgeScore));
   }
 
   // -- Signal 8: Aspect Ratio --------------------------------------
@@ -394,14 +447,12 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       if (dist < minDist) minDist = dist;
     }
 
-    // Close to a standard camera ratio = good
-    if (minDist < 0.02) return 0.85;
-    if (minDist < 0.05) return 0.7;
-    if (minDist < 0.15) return 0.55;
-
-    // Unusual ratios: cropped screenshots, edited images
-    return 0.35;
-
+    // Selfie viewfinders crop to ovals and squares in the browser — keep this
+    // signal very loose. It's informational only at weight 0.05.
+    if (minDist < 0.05) return 0.85;
+    if (minDist < 0.15) return 0.75;
+    if (minDist < 0.30) return 0.60;
+    return 0.45;
   }
 
   // -- Helper: Byte Entropy -----------------------------------------
@@ -444,8 +495,7 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
     for (let i = 0; i < buffer.length - 1; i++) {
       if (buffer[i] === 0xFF && buffer[i + 1] === 0xDB) {
         dqtCount++;
-        // Sample quantization values after the marker
-        const tableStart = i + 5; // Skip marker (2) + length (2) + precision/id (1)
+        const tableStart = i + 5; // marker(2) + length(2) + precision/id(1)
         const tableEnd = Math.min(tableStart + 64, buffer.length);
         for (let j = tableStart; j < tableEnd; j++) {
           totalQValue += buffer[j];
@@ -454,17 +504,20 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       }
     }
 
-    if (dqtCount === 0) return 0.5; // No quant tables -- not standard JPEG
+    if (dqtCount === 0) return 0.5; // not a standard JPEG
 
     const avgQValue = qValueCount > 0 ? totalQValue / qValueCount : 50;
 
-    // Low quantization values = high quality (camera default)
-    // High quantization values = heavy compression (re-saves, screenshots saved as JPEG)
-    if (avgQValue < 10) return 0.9;  // Very high quality -- likely camera
-    if (avgQValue < 30) return 0.75; // Good quality
-    if (avgQValue < 60) return 0.55; // Moderate -- could be re-saved
-    if (avgQValue < 100) return 0.4; // Heavy compression
-    return 0.3; // Very heavy -- likely multiple re-compressions
+    // Lower quantization values = higher quality (camera default, q≈95+).
+    // Canvas toBlob('image/jpeg', 0.8) lands around 30–60 which is perfectly fine
+    // for a live selfie. Only penalize clearly over-compressed (avg > 80) or
+    // near-flat (avg < 5) tables.
+    if (avgQValue < 15) return 0.92;
+    if (avgQValue < 35) return 0.85;
+    if (avgQValue < 65) return 0.78; // normal canvas jpeg at q=0.7–0.9
+    if (avgQValue < 90) return 0.55; // low-quality jpeg (messenger-save style)
+    if (avgQValue < 130) return 0.35;
+    return 0.25;
   }
 
   // -- Helper: Count JPEG Markers -----------------------------------

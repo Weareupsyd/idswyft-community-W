@@ -34,6 +34,11 @@ export function evaluateGate6(amlResult: AMLScreeningResult | null): GateResult 
       passed: false,
       rejection_reason: 'AML_MATCH_FOUND',
       rejection_detail: `Confirmed sanctions list match: "${topMatch?.listed_name}" on ${topMatch?.list_source} (score: ${topMatch?.score.toFixed(2)})`,
+      rejection_breakdown: {
+        category: 'sanctions',
+        summary: 'Confirmed match found on global sanctions list',
+        details: amlResult.matches.map(m => `Match on ${m.list_source}: ${m.listed_name} (score: ${(m.score * 100).toFixed(0)}%)`),
+      },
       user_message: 'Verification could not be completed. Please contact support for assistance.',
     };
   }
@@ -43,6 +48,11 @@ export function evaluateGate6(amlResult: AMLScreeningResult | null): GateResult 
       passed: false,
       rejection_reason: 'AML_POTENTIAL_MATCH',
       rejection_detail: `Potential sanctions list match found (${amlResult.matches.length} match(es)). Manual review required.`,
+      rejection_breakdown: {
+        category: 'sanctions',
+        summary: 'Potential match found on sanctions watchlist requiring manual review',
+        details: amlResult.matches.map(m => `Potential match on ${m.list_source}: ${m.listed_name} (score: ${(m.score * 100).toFixed(0)}%)`),
+      },
       user_message: 'Your verification requires additional review. You will be notified of the outcome.',
     };
   }

@@ -311,6 +311,134 @@ print(result["status"])  # 'verified' | 'failed' | 'manual_review'
 
 ---
 
+## Webhooks
+
+Instead of polling `GET /api/v2/verify/:id/status`, you can register an HTTPS endpoint in the **Developer Portal → Webhooks** section and Idswyft will `POST` JSON events to it as they happen.
+
+### Setup
+1. Build an endpoint on your backend that accepts `POST` requests (e.g. `https://your-app.com/idswyft/webhook`).
+2. In the portal, paste the URL, pick which events to subscribe to (or "select all"), optionally scope it to a single API key, and click **+ Add Webhook**.
+3. Copy the generated **signing secret** (shown once; available later via the Reveal button) — use it to verify every delivery before trusting it.
+
+### Events
+
+| Event | Fires when |
+|---|---|
+| `verification.started` | A new verification session is created (`/initialize`) |
+| `verification.document_processed` | Front or back document finishes OCR + cross-validation |
+| `verification.completed` | Final status is `verified` |
+| `verification.failed` | Final status is `failed` (hard reject or gate failure) |
+| `verification.manual_review` | Verification is flagged for human review |
+| `document.expiry_warning` | Uploaded document is near or past its expiry date |
+| `verification.reverification_due` | A scheduled re-verification becomes due |
+
+### Payload shape (envelope)
+
+Every delivery uses the same envelope. The `data` object varies slightly per event.
+
+```json
+{
+  "event": "verification.completed",
+  "user_id": "c0d0ffee-1234-5678-90ab-cdef00000001",
+  "verification_id": "a1b2c3d4-5678-90ef-1234-567890abcdef",
+  "status": "verified",
+  "timestamp": "2026-08-05T12:34:56.000Z",
+  "is_service": false,
+  "data": {
+    "ocr_data": {
+      "full_name": "JANE AOCHIENG OWINO",
+      "date_of_birth": "1992-04-18",
+      "id_number": "CM12345678P9XYZ",
+      "issuing_country": "UG",
+      "address": "BUKOTO, KAWEMPE DIVISION, KAMPALA"
+    },
+    "face_match_score": 0.94,
+    "failure_reason": null
+  }
+}
+```
+
+### Request headers
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json` |
+| `User-Agent` | `Idswyft-Webhooks/1.0` |
+| `X-Idswyft-Webhook-Id` | UUID of this delivery row (use for idempotency / support) |
+| `X-Idswyft-Delivery-Attempt` | `1`, `2`, `3`… (increments on retries) |
+| `X-Idswyft-Sandbox` | `"true"` / `"false"` |
+| `X-Idswyft-Verification-Mode` | `"sandbox"` or `"production"` |
+| `X-Idswyft-Signature` | `sha256=<hex>` — HMAC-SHA256 of the raw body, signed with your webhook secret |
+| `X-Idswyft-Is-Service` | Present only when the call came from a service/operator key |
+| `X-Idswyft-Service-Product` | Service-key product label (when applicable) |
+| `X-Idswyft-Service-Environment` | Service-key environment label (when applicable) |
+
+### Verifying the signature (Node.js example)
+
+Always verify `X-Idswyft-Signature` before trusting a payload — otherwise anyone on the internet can POST fake events to you. Compute the HMAC over the **raw request body** (not the re-serialized parsed JSON — key order can change).
+
+```js
+// Express — use express.raw for this route so req.body is a Buffer
+const crypto = require('crypto');
+const express = require('express');
+const app = express();
+
+const WEBHOOK_SECRET = process.env.IDSwyft_WEBHOOK_SECRET; // from the portal
+
+app.post('/idswyft/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const signature = req.headers['x-idswyft-signature'];
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', WEBHOOK_SECRET)
+    .update(req.body)
+    .digest('hex');
+
+  // timingSafeEqual prevents timing attacks
+  const sigBuf = Buffer.from(signature || '', 'utf8');
+  const expBuf = Buffer.from(expected, 'utf8');
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return res.status(401).send('bad signature');
+  }
+
+  const payload = JSON.parse(req.body.toString('utf8'));
+
+  switch (payload.event) {
+    case 'verification.completed':
+      // e.g. mark the user verified in your DB, trigger onboarding
+      console.log('verified', payload.verification_id, payload.data.ocr_data.full_name);
+      break;
+    case 'verification.failed':
+      console.log('failed', payload.data.failure_reason);
+      break;
+    case 'verification.manual_review':
+      // queue for human review
+      break;
+    default:
+      // unhandled event — ACK anyway so Idswyft doesn't retry
+      break;
+  }
+
+  res.sendStatus(200); // any 2xx = success; 5xx/timeout triggers retries
+});
+
+app.listen(3000);
+```
+
+### Retries & reliability
+
+- 5xx responses, network errors, and timeouts trigger automatic retries with exponential backoff (~1 min → 5 min → 15 min, capped).
+- 4xx responses are treated as intentional rejection and are **not** retried (return 401 for bad signatures rather than 500).
+- All deliveries are logged in the portal under **Active endpoints → Recent deliveries** with request payload, response code, response body, and a manual **Resend** button for failed deliveries.
+- A built-in SSRF guard blocks delivery to RFC1918 private IPs / metadata services / loopback addresses when not running in dev mode.
+
+### Security notes
+
+- Secrets are stored encrypted at rest.
+- HTTPS (TLS 1.2+) is required for non-localhost URLs.
+- Always use `X-Idswyft-Sandbox` / `X-Idswyft-Verification-Mode` to avoid processing sandbox test data as real verifications.
+- Use `X-Idswyft-Webhook-Id` as an idempotency key if your side effects (emails, DB writes) must not run twice.
+
+---
+
 ## Architecture
 
 ```

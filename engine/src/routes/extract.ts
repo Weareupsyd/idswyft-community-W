@@ -26,6 +26,8 @@ import {
   HeadTurnLivenessMetadataSchema,
   SharpTamperDetector, DocumentZoneValidator,
   createDeepfakeDetector,
+  cropBothAsDataUris,
+  mergeLabeledAddressFields,
 } from '@idswyft/shared';
 import type {
   HeadTurnLivenessMetadata,
@@ -274,7 +276,23 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
     // Resolve document type: use auto-classified type if available, otherwise raw input
     const resolvedDocType = ocrData?.detected_document_type || documentType;
 
-    // 4. Tamper detection + zone validation
+    // 4. Extract face crops as base64 — two variants:
+    //    - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
+    //    - id_face_full_base64:  generously padded crop trimmed to the printed photo box
+    //                            (full portrait including shoulders)
+    let idFaceBase64: string | null = null;
+    let idFaceFullBase64: string | null = null;
+    if (imageBuffer && faceBoundingBox) {
+      try {
+        const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
+        idFaceBase64 = crops.id_face_base64;
+        idFaceFullBase64 = crops.id_face_full_base64;
+      } catch (err) {
+        logger.warn('Failed to extract cropped face from ID image', { error: err });
+      }
+    }
+
+    // 5. Tamper detection + zone validation
     let authenticity: FrontExtractionResult['authenticity'] = undefined;
     try {
       const tamperResult = await new SharpTamperDetector().analyze(imageBuffer);
@@ -321,6 +339,8 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
       authenticity,
       face_age: faceAge,
       face_gender: faceGender,
+      id_face_base64: idFaceBase64,
+      id_face_full_base64: idFaceFullBase64,
     };
 
     logger.info('Front extraction complete', {
@@ -413,6 +433,49 @@ router.post('/back', upload.single('file'), async (req: Request, res: Response) 
       barcodeFormat = mrzFormatMap[mrzResult.format] || null;
     }
 
+    // 4. Fallback: If barcode and MRZ were not found or if issuing country is UG (or national_id),
+    // run OCR on back document image to extract text fields (e.g. District, Sub-county, Parish, Village, Address)
+    const reqIssuingCountry = req.body.issuing_country || 'UG';
+    if (!finalQrPayload || Object.values(finalQrPayload).every(v => !v) || reqIssuingCountry === 'UG') {
+      try {
+        const backOcr = await ocrService.processDocumentFromBuffer(imageBuffer, 'national_id', reqIssuingCountry);
+        if (backOcr) {
+          finalQrPayload = {
+            ...(finalQrPayload || {}),
+            first_name: (backOcr as any).first_name || (finalQrPayload as any)?.first_name || '',
+            last_name: (backOcr as any).last_name || (finalQrPayload as any)?.last_name || '',
+            full_name: backOcr.name || (backOcr as any).full_name || (finalQrPayload as any)?.full_name || '',
+            date_of_birth: backOcr.date_of_birth || (finalQrPayload as any)?.date_of_birth || '',
+            id_number: backOcr.document_number || (backOcr as any).id_number || (finalQrPayload as any)?.id_number || '',
+            expiry_date: backOcr.expiration_date || (backOcr as any).expiry_date || (finalQrPayload as any)?.expiry_date || '',
+            nationality: backOcr.nationality || (finalQrPayload as any)?.nationality || '',
+            address: backOcr.address || (finalQrPayload as any)?.address || [(backOcr as any).village, (backOcr as any).parish, (backOcr as any).sub_county, (backOcr as any).district, 'Uganda'].filter(Boolean).join(', ') || '',
+            issuing_country: backOcr.issuing_country || reqIssuingCountry,
+            district: (backOcr as any).district || '',
+            sub_county: (backOcr as any).sub_county || (backOcr as any).county || '',
+            parish: (backOcr as any).parish || '',
+            village: (backOcr as any).village || '',
+            raw_text: backOcr.raw_text || rawText || '',
+          } as any;
+        }
+      } catch (err) {
+        logger.debug('Back document OCR fallback in engine', { error: err });
+      }
+    }
+
+    // 5. Merge labeled address fields (VILLAGE/PARISH/S.COUNTY/DISTRICT) parsed
+    //    directly from the barcode raw_text — this fills in Ugandan-ID fields
+    //    even when the OCR branch above didn't run or produced fewer fields,
+    //    and ensures fields like address/district/parish/village line up with
+    //    what's visible in raw_text rather than returning empty strings.
+    if (finalQrPayload) {
+      const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
+      const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
+      finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
+      // Always propagate issuing_country if not already set
+      if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = reqIssuingCountry;
+    }
+
     const hasMrz = mrzResult !== null;
     const mrzForGate = hasMrz ? {
       raw_lines: mrzResult!.raw_lines,
@@ -501,8 +564,12 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
     // 2. Liveness detection: head-turn (active) or passive
     let livenessScore = 0;
     let livenessPassed = false;
+    let livenessSignals: LiveCaptureResult['liveness_signals'];
+    let livenessMode: 'passive' | 'head_turn' = 'passive';
+    const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
     if (headTurnMetadata) {
+      livenessMode = 'head_turn';
       try {
         const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
         livenessScore = headTurnResult.score;
@@ -510,23 +577,30 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
         logger.info('Head-turn liveness verification complete', {
           score: livenessScore.toFixed(3),
           passed: livenessPassed,
+          threshold: livenessThreshold,
           reason: headTurnResult.reason,
         });
       } catch (err) {
         logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
+        livenessMode = 'passive';
       }
     }
 
-    if (!headTurnMetadata || (livenessScore === 0 && !livenessPassed)) {
+    if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
+      livenessMode = 'passive';
       try {
-        livenessScore = await livenessProvider.assessLiveness({ buffer: selfieBuffer });
-        const threshold = getLivenessThresholdSync(isSandbox);
-        livenessPassed = livenessScore >= threshold;
+        const detailed = livenessProvider.assessLivenessDetailed
+          ? await livenessProvider.assessLivenessDetailed({ buffer: selfieBuffer })
+          : { score: await livenessProvider.assessLiveness({ buffer: selfieBuffer }), signals: undefined as any };
+        livenessScore = detailed.score;
+        livenessSignals = detailed.signals;
+        livenessPassed = livenessScore >= livenessThreshold;
         logger.info('Passive liveness assessment complete', {
           provider: livenessProvider.name,
           score: livenessScore.toFixed(3),
-          threshold,
+          threshold: livenessThreshold,
           passed: livenessPassed,
+          signals: Object.fromEntries((detailed.signals || []).map((s: any) => [s.key, +s.score.toFixed(3)])),
         });
       } catch (err) {
         logger.error('Liveness provider failed, defaulting to fail-safe', { error: err });
@@ -560,6 +634,10 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
       face_confidence: faceConfidence,
       liveness_passed: livenessPassed,
       liveness_score: livenessScore,
+      liveness_threshold: livenessThreshold,
+      liveness_provider: livenessProvider.name,
+      liveness_mode: livenessMode,
+      liveness_signals: livenessSignals,
       deepfake_check,
       face_age: liveFaceAge,
       face_gender: liveFaceGender,

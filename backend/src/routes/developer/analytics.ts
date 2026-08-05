@@ -63,9 +63,14 @@ router.get('/stats',
     const pendingRequests = stats.filter((s: any) => s.status === 'pending').length;
     const manualReviewRequests = stats.filter((s: any) => s.status === 'manual_review').length;
 
-    // Service keys / operators (api_key_id scoped) have no plan quota — that is
-    // the point of service keys. Developers (apiKeyId null) keep the 50/mo limit.
-    const monthlyLimit = apiKeyId ? null : 50;
+    // Service keys / operators (api_key_id scoped) have no plan quota.
+    // Community (self-hosted) edition is unlimited per README — the 50/mo
+    // figure is a Cloud Starter-plan cap. Use SELF_HOSTED_UNLIMITED=true
+    // (or the default for any non-cloud build) to suppress the limit.
+    const isSelfHosted = process.env.SELF_HOSTED_UNLIMITED !== 'false';
+    const defaultLimit = isSelfHosted ? null : 50;
+    // Developers (apiKeyId null) inherit the default; service/operator keys are unlimited.
+    const monthlyLimit = apiKeyId ? null : defaultLimit;
 
     res.json({
       period: 'month',
@@ -284,8 +289,12 @@ router.get('/analytics',
     const { count } = await cq;
 
     const used = count ?? 0;
-    // Service keys / operators (api_key_id scoped) have no quota; developers keep 50/mo.
-    const limit = apiKeyId ? null : 50;
+    // Service keys / operators (api_key_id scoped) have no quota. Community
+    // (self-hosted) defaults to unlimited; set SELF_HOSTED_UNLIMITED=false
+    // to re-enforce the 50/mo soft cap shown in the UI.
+    const isSelfHosted = process.env.SELF_HOSTED_UNLIMITED !== 'false';
+    const defaultLimit = isSelfHosted ? null : 50;
+    const limit = apiKeyId ? null : defaultLimit;
 
     res.json({
       daily_volume,

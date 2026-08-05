@@ -28,6 +28,8 @@ import {
   decryptSecret,
   FLOW_PRESETS,
   applyPassportOverride,
+  cropBothAsDataUris,
+  mergeLabeledAddressFields,
 } from '@idswyft/shared';
 import type {
   HeadTurnLivenessMetadata,
@@ -125,6 +127,7 @@ function createSession(isSandbox: boolean, hydration?: SessionHydration, addons?
     },
     computeFaceMatch,
     faceMatchThreshold: getFaceMatchingThresholdSync(isSandbox),
+    livenessThreshold: getLivenessThresholdSync(isSandbox),
     screenAML: amlEnabled
       ? async (fullName, dob, nationality) => screenAll(amlProviders, { full_name: fullName, date_of_birth: dob, nationality })
       : undefined,
@@ -379,6 +382,22 @@ async function extractFrontDocument(
     }
   }
 
+  // Extract face crops as base64 — two variants:
+  //  - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
+  //  - id_face_full_base64:  generously padded crop trimmed to the printed ID photo box
+  //                          (full portrait including shoulders)
+  let idFaceBase64: string | null = null;
+  let idFaceFullBase64: string | null = null;
+  if (imageBuffer && faceBoundingBox) {
+    try {
+      const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
+      idFaceBase64 = crops.id_face_base64;
+      idFaceFullBase64 = crops.id_face_full_base64;
+    } catch (err) {
+      logger.warn('Failed to extract cropped face from ID image', { error: err });
+    }
+  }
+
   return {
     ocr: {
       full_name: ocrData?.name || '',
@@ -394,12 +413,16 @@ async function extractFrontDocument(
     ocr_confidence: avgConfidence,
     mrz_from_front: mrzFromFront,
     authenticity,
+    id_face_base64: idFaceBase64,
+    id_face_full_base64: idFaceFullBase64,
   };
 }
 
 /** Run back barcode extraction and build BackExtractionResult */
 async function extractBackDocument(
   documentPath: string,
+  documentId?: string,
+  issuingCountry?: string,
 ): Promise<BackExtractionResult> {
   let barcodeData;
   try {
@@ -461,6 +484,48 @@ async function extractBackDocument(
     barcodeFormat = mrzFormatMap[mrzResult.format] || null;
   }
 
+  // Fallback: If barcode and MRZ were not found or if issuing country is UG (or non-US national ID),
+  // run OCR on back document image to extract text fields (e.g. District, Sub-county, Parish, Village, Address)
+  if (!finalQrPayload || Object.values(finalQrPayload).every(v => !v) || issuingCountry === 'UG') {
+    try {
+      const docId = documentId || 'back_doc';
+      const backOcr = await ocrService.processDocument(docId, documentPath, 'national_id', issuingCountry || 'UG');
+      if (backOcr) {
+        finalQrPayload = {
+          ...(finalQrPayload || {}),
+          first_name: (backOcr as any).first_name || (finalQrPayload as any)?.first_name || '',
+          last_name: (backOcr as any).last_name || (finalQrPayload as any)?.last_name || '',
+          full_name: backOcr.name || (backOcr as any).full_name || (finalQrPayload as any)?.full_name || '',
+          date_of_birth: backOcr.date_of_birth || (finalQrPayload as any)?.date_of_birth || '',
+          id_number: backOcr.document_number || (backOcr as any).id_number || (finalQrPayload as any)?.id_number || '',
+          expiry_date: backOcr.expiration_date || (backOcr as any).expiry_date || (finalQrPayload as any)?.expiry_date || '',
+          nationality: backOcr.nationality || (finalQrPayload as any)?.nationality || '',
+          address: backOcr.address || (finalQrPayload as any)?.address || [(backOcr as any).village, (backOcr as any).parish, (backOcr as any).sub_county, (backOcr as any).district, 'Uganda'].filter(Boolean).join(', ') || '',
+          issuing_country: backOcr.issuing_country || issuingCountry || 'UG',
+          district: (backOcr as any).district || '',
+          sub_county: (backOcr as any).sub_county || (backOcr as any).county || '',
+          parish: (backOcr as any).parish || '',
+          village: (backOcr as any).village || '',
+          raw_text: backOcr.raw_text || rawText || '',
+        } as any;
+      }
+    } catch (err) {
+      logger.debug('Back document OCR fallback did not yield additional fields', { error: err });
+    }
+  }
+
+  // Fill in any blank Ugandan address fields (village/parish/sub_county/district/address)
+  // by parsing "LABEL: value" lines directly out of the barcode raw_text. This
+  // aligns barcode_data with what's visible in raw_text so fields don't come back
+  // empty when the barcode scan successfully read the lines but the structured
+  // parser (AAMVA/PDF417/MRZ) didn't emit them.
+  if (finalQrPayload) {
+    const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
+    const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
+    finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
+    if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = issuingCountry || 'UG';
+  }
+
   // Build MRZ result for Gate 2
   const hasMrz = mrzResult !== null;
   const mrzForGate = hasMrz ? {
@@ -509,8 +574,12 @@ async function extractLiveCapture(
   // Liveness detection: head-turn (active) or passive heuristics
   let livenessScore = 0;
   let livenessPassed = false;
+  let livenessSignals: LiveCaptureResult['liveness_signals'];
+  let livenessMode: 'passive' | 'head_turn' = 'passive';
+  const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
   if (headTurnMetadata) {
+    livenessMode = 'head_turn';
     // Head-turn liveness — server-side face analysis of captured frames
     try {
       const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
@@ -519,30 +588,34 @@ async function extractLiveCapture(
       logger.info('Head-turn liveness verification complete', {
         score: livenessScore.toFixed(3),
         passed: livenessPassed,
+        threshold: livenessThreshold,
         reason: headTurnResult.reason,
         challenge: headTurnMetadata.challenge_direction,
         frameCount: headTurnMetadata.frames.length,
       });
     } catch (err) {
       logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
-      // Fall through to passive liveness below
+      livenessMode = 'passive';
     }
   }
 
-  if (!headTurnMetadata || (livenessScore === 0 && !livenessPassed)) {
+  if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
+    livenessMode = 'passive';
     // Passive liveness — image-based heuristics
     try {
-      livenessScore = await livenessProvider.assessLiveness({
-        buffer: selfieBuffer,
-      });
-      const threshold = getLivenessThresholdSync(isSandbox);
-      livenessPassed = livenessScore >= threshold;
+      const detailed = livenessProvider.assessLivenessDetailed
+        ? await livenessProvider.assessLivenessDetailed({ buffer: selfieBuffer })
+        : { score: await livenessProvider.assessLiveness({ buffer: selfieBuffer }), signals: undefined as any };
+      livenessScore = detailed.score;
+      livenessSignals = detailed.signals;
+      livenessPassed = livenessScore >= livenessThreshold;
       logger.info('Passive liveness assessment complete', {
         provider: livenessProvider.name,
         score: livenessScore.toFixed(3),
-        threshold,
+        threshold: livenessThreshold,
         passed: livenessPassed,
         isSandbox,
+        signals: Object.fromEntries((detailed.signals || []).map((s: any) => [s.key, +s.score.toFixed(3)])),
       });
     } catch (err) {
       logger.error('Liveness provider failed, defaulting to fail-safe', { error: err });
@@ -579,6 +652,10 @@ async function extractLiveCapture(
     face_confidence: faceConfidence,
     liveness_passed: livenessPassed,
     liveness_score: livenessScore,
+    liveness_threshold: livenessThreshold,
+    liveness_provider: livenessProvider.name,
+    liveness_mode: livenessMode,
+    liveness_signals: livenessSignals,
     deepfake_check,
   };
 }
@@ -699,6 +776,12 @@ async function fireWebhooksIfTerminal(
       data: {
         ocr_data: state.front_extraction?.ocr ?? undefined,
         face_match_score: state.face_match?.similarity_score ?? undefined,
+        liveness_score: state.liveness?.score ?? undefined,
+        liveness_passed: state.liveness?.passed ?? undefined,
+        liveness_threshold: state.liveness?.threshold ?? undefined,
+        liveness_provider: state.liveness?.provider ?? undefined,
+        liveness_mode: state.liveness?.mode ?? undefined,
+        liveness_signals: state.liveness?.signals ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -754,6 +837,8 @@ async function fireWebhookEvent(
       data: {
         ocr_data: state.front_extraction?.ocr ?? undefined,
         face_match_score: state.face_match?.similarity_score ?? undefined,
+        liveness_score: state.liveness?.score ?? undefined,
+        liveness_passed: state.liveness?.passed ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -814,7 +899,7 @@ router.post('/initialize',
   ],
   validate,
   catchAsync(async (req: Request, res: Response) => {
-    const { user_id, document_type = 'auto', issuing_country } = req.body;
+    const { user_id, document_type = 'national_id', issuing_country = 'UG' } = req.body;
     const addons: VerificationAddons = req.body.addons || {};
     const source: VerificationSource = req.body.source || 'api';
     const verificationMode: string = req.body.verification_mode || 'full';
@@ -1145,7 +1230,7 @@ router.post('/:verification_id/front-document',
     }
 
     const { verification_id } = req.params;
-    const { document_type = 'auto', issuing_country } = req.body;
+    const { document_type = 'national_id', issuing_country = 'UG' } = req.body;
     const verification = await requireOwnedVerification(req, verification_id);
     const isSandbox = (verification as any).is_sandbox || false;
     const source: VerificationSource = (verification as any).source || 'api';
@@ -1198,9 +1283,13 @@ router.post('/:verification_id/front-document',
     }
 
     // Store document in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `front_id_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'front_document.jpg'}`;
+
     const documentPath = await storageService.storeDocument(
       req.file.buffer,
-      req.file.originalname || 'front_document.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source
@@ -1500,9 +1589,13 @@ router.post('/:verification_id/back-document',
     }
 
     // Store document in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `back_id_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'back_document.jpg'}`;
+
     const documentPath = await storageService.storeDocument(
       req.file.buffer,
-      req.file.originalname || 'back_document.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source
@@ -1518,9 +1611,11 @@ router.post('/:verification_id/back-document',
     });
 
     // Run back extraction (country context flows to Gate 2 via session state)
+    const savedState = await loadSessionState(verification_id);
+    const issuingCountry = savedState?.issuing_country || 'UG';
     const backResult = engineClient.isEnabled()
-      ? await engineClient.extractBack(req.file.buffer)
-      : await extractBackDocument(documentPath);
+      ? await engineClient.extractBack(req.file.buffer, { issuingCountry })
+      : await extractBackDocument(documentPath, document.id, issuingCountry);
 
     // Ephemeral cleanup: demo files are deleted immediately after extraction
     if (source === 'demo') {
@@ -1714,9 +1809,13 @@ router.post('/:verification_id/live-capture',
     }
 
     // Store selfie in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `live_selfie_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'selfie.jpg'}`;
+
     const selfiePath = await storageService.storeSelfie(
       req.file.buffer,
-      req.file.originalname || 'selfie.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source
@@ -1942,7 +2041,10 @@ router.post('/:verification_id/live-capture',
       liveness_results: {
         liveness_passed: liveResult.liveness_passed,
         liveness_score: liveResult.liveness_score,
-        liveness_mode: headTurnMetadata ? 'head_turn' : 'passive',
+        liveness_threshold: (liveResult as any).liveness_threshold,
+        liveness_provider: (liveResult as any).liveness_provider,
+        liveness_mode: (liveResult as any).liveness_mode || (headTurnMetadata ? 'head_turn' : 'passive'),
+        liveness_signals: (liveResult as any).liveness_signals ?? null,
       },
       deepfake_check: liveResult.deepfake_check ?? null,
       age_estimation: state.age_estimation ?? null,
@@ -2433,6 +2535,94 @@ router.get('/:verification_id/status',
       flow,
     });
     res.json(response);
+  })
+);
+
+// ─── ID Face photo retrieval (developer-scoped) ─────────────────────────────
+// Helper shared by /id-face and /id-face-full
+async function loadIdFaceForRequest(req: Request, verification_id: string) {
+  if (req.sessionVerificationId && req.sessionVerificationId !== verification_id) {
+    const err: any = new Error('Verification request not found');
+    err.statusCode = 404;
+    throw err;
+  }
+  const verification = await requireOwnedVerification(req, verification_id);
+  const isSandbox = (verification as any).is_sandbox || false;
+  const session = await hydrateSession(verification_id, isSandbox);
+  return { verification, state: session.getState() };
+}
+
+/**
+ * GET /api/v2/verify/:id/id-face
+ * Returns the tight-but-padded headshot crop (ears/hair/chin preserved).
+ * Kept for backward compatibility with existing integrations.
+ */
+router.get('/:verification_id/id-face',
+  authenticateAPIKeyOrHandoff,
+  [
+    param('verification_id').isUUID().withMessage('Invalid verification ID'),
+  ],
+  validate,
+  catchAsync(async (req: Request, res: Response) => {
+    const { verification_id } = req.params;
+    const { state } = await loadIdFaceForRequest(req, verification_id);
+
+    const idFaceBase64 = state.front_extraction?.id_face_base64 ?? null;
+    if (!idFaceBase64) {
+      return res.status(404).json({
+        success: false,
+        verification_id,
+        id_face_base64: null,
+        message: 'Cropped ID face image not available for this verification',
+      });
+    }
+
+    res.json({
+      success: true,
+      verification_id,
+      id_face_base64: idFaceBase64,
+      face_confidence: state.front_extraction?.face_confidence ?? null,
+    });
+  })
+);
+
+/**
+ * GET /api/v2/verify/:id/id-face-full
+ * Returns the full ID portrait (generously padded, whitespace-trimmed to the
+ * printed photo box) so ears, hair, chin and shoulders are all captured.
+ * Also echoes the tight headshot for convenience, so clients that need both
+ * crops only need one round trip.
+ */
+router.get('/:verification_id/id-face-full',
+  authenticateAPIKeyOrHandoff,
+  [
+    param('verification_id').isUUID().withMessage('Invalid verification ID'),
+  ],
+  validate,
+  catchAsync(async (req: Request, res: Response) => {
+    const { verification_id } = req.params;
+    const { state } = await loadIdFaceForRequest(req, verification_id);
+
+    const standard = state.front_extraction?.id_face_base64 ?? null;
+    const full = (state.front_extraction as any)?.id_face_full_base64 ?? null;
+
+    if (!standard && !full) {
+      return res.status(404).json({
+        success: false,
+        verification_id,
+        id_face_base64: null,
+        id_face_full_base64: null,
+        message: 'Cropped ID face image not available for this verification',
+      });
+    }
+
+    res.json({
+      success: true,
+      verification_id,
+      id_face_base64: standard,
+      id_face_full_base64: full,
+      face_confidence: state.front_extraction?.face_confidence ?? null,
+    });
   })
 );
 

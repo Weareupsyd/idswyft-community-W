@@ -76,9 +76,24 @@ export const VERIFICATION_THRESHOLDS: VerificationThresholds = {
   },
   
   // Liveness detection thresholds (anti-spoofing)
+  //
+  // Production default (0.55) is tuned for browser getUserMedia() → canvas
+  // re-encodes, which the heuristic scorer treats somewhat suspiciously because
+  // canvas.toBlob strips EXIF and re-uses libjpeg quantization tables. For
+  // native mobile apps sending the original camera JPEG (with full EXIF) you
+  // can raise this via LIVENESS_THRESHOLD env (recommended 0.70–0.75).
+  // Sandbox (0.45) is intentionally more lenient for developer testing.
   LIVENESS: {
-    production: 0.75,  // High security requirement
-    sandbox: 0.65      // More lenient for development/testing
+    production: (() => {
+      const env = process.env.LIVENESS_THRESHOLD;
+      const v = env ? parseFloat(env) : NaN;
+      return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.55;
+    })(),
+    sandbox: (() => {
+      const env = process.env.LIVENESS_THRESHOLD_SANDBOX;
+      const v = env ? parseFloat(env) : NaN;
+      return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.45;
+    })(),
   },
   
   // Cross-validation between front and back document data

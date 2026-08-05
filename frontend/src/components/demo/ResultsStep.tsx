@@ -1,6 +1,7 @@
 import React from 'react';
 import { C } from '../../theme';
 import type { VerificationRequest } from './types';
+import { getDocumentationApiUrl } from '../../config/api';
 
 // ─── JSON syntax highlighting ───────────────────────────────────
 const jsonTokenColors = {
@@ -129,7 +130,17 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
 
   const cv = verificationRequest?.cross_validation_results;
   const fm = verificationRequest?.face_match_results;
-  const lv = verificationRequest?.liveness_results;
+  // Normalize liveness result shape — response uses snake_case, immediate
+  // POST response uses camelCase, and older records may use the legacy shape.
+  const lvRaw = verificationRequest?.liveness_results;
+  const lv = lvRaw ? {
+    passed: lvRaw.passed ?? lvRaw.liveness_passed,
+    score: lvRaw.score ?? lvRaw.liveness_score,
+    threshold: lvRaw.threshold ?? lvRaw.liveness_threshold,
+    provider: lvRaw.provider ?? lvRaw.liveness_provider,
+    mode: lvRaw.mode ?? lvRaw.liveness_mode,
+    signals: lvRaw.signals ?? lvRaw.liveness_signals ?? null,
+  } : null;
   const aml = verificationRequest?.aml_screening;
   const risk = verificationRequest?.risk_score;
   const ageEst = verificationRequest?.age_estimation;
@@ -167,6 +178,135 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
           </div>
         )}
       </div>
+
+      {/* Rejection Breakdown (Segmented details) */}
+      {verificationRequest?.rejection_breakdown && (
+        <div style={{ ...cardStyle, background: C.redDim, border: `1px solid rgba(248,113,113,0.3)` }}>
+          <div style={{ ...cardTitle, color: C.red }}>Rejection Details (Segmented Breakdown)</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+            {verificationRequest.rejection_breakdown.summary}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontFamily: C.mono, textTransform: 'uppercase' as const, padding: '2px 8px', background: C.red, color: '#fff', fontWeight: 600 }}>
+              Category: {verificationRequest.rejection_breakdown.category}
+            </span>
+            {verificationRequest.rejection_breakdown.score_details?.actual_score != null && (
+              <span style={{ fontSize: 11, fontFamily: C.mono, color: C.muted }}>
+                Score: {verificationRequest.rejection_breakdown.score_details.actual_score} (required: {verificationRequest.rejection_breakdown.score_details.required_threshold})
+              </span>
+            )}
+          </div>
+
+          {verificationRequest.rejection_breakdown.field_mismatches && verificationRequest.rejection_breakdown.field_mismatches.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid rgba(248,113,113,0.2)` }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, marginBottom: 4 }}>Specific Field Mismatches:</div>
+              {verificationRequest.rejection_breakdown.field_mismatches.map((fm: any, idx: number) => (
+                <div key={idx} style={{ fontSize: 12, color: C.muted, marginBottom: 4, paddingLeft: 8, borderLeft: `2px solid ${C.red}` }}>
+                  <strong style={{ color: C.text }}>{fm.field}:</strong> {fm.reason}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {verificationRequest.rejection_breakdown.details && verificationRequest.rejection_breakdown.details.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, marginBottom: 4 }}>Detailed Signals:</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: C.muted }}>
+                {verificationRequest.rejection_breakdown.details.map((d: string, idx: number) => (
+                  <li key={idx} style={{ marginBottom: 2 }}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Extracted ID Face Card — standard + full crops */}
+      {(() => {
+        const standard =
+          verificationRequest?.id_face_base64 ||
+          (verificationRequest?.ocr_data as any)?.id_face_base64 ||
+          null;
+        const full =
+          (verificationRequest as any)?.id_face_full_base64 ||
+          (verificationRequest?.ocr_data as any)?.id_face_full_base64 ||
+          null;
+        if (!standard && !full) return null;
+
+        // Build full endpoint URLs using the current origin (self-hosted) or
+        // configured API base, with the real verification_id filled in.
+        const apiBase = getDocumentationApiUrl().replace(/\/+$/, '');
+        const vid = verificationRequest?.verification_id || verificationRequest?.id || '<verification_id>';
+        const headshotUrl = `${apiBase}/api/v2/verify/${vid}/id-face`;
+        const fullUrl = `${apiBase}/api/v2/verify/${vid}/id-face-full`;
+        // Pretty-print with a line-break before the ID so long URLs don't blow out the card width
+        const breakUrl = (u: string) => {
+          const i = u.lastIndexOf('/verify/');
+          if (i < 0) return u;
+          const before = u.slice(0, i + '/verify/'.length);
+          const after = u.slice(i + '/verify/'.length);
+          return (
+            <>
+              {before}
+              <wbr />
+              {after}
+            </>
+          );
+        };
+
+        return (
+          <div style={cardStyle}>
+            <div style={cardTitle}>Extracted ID Face Photo</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              {standard && (
+                <div style={{ textAlign: 'center' }}>
+                  <img
+                    src={standard}
+                    alt="Cropped face from ID (headshot)"
+                    style={{ width: 80, height: 80, objectFit: 'cover', border: `1px solid ${C.borderStrong}`, display: 'block' }}
+                  />
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 4, fontFamily: C.mono }}>id-face (headshot)</div>
+                </div>
+              )}
+              {full && (
+                <div style={{ textAlign: 'center' }}>
+                  <img
+                    src={full}
+                    alt="Full portrait from ID (ears/hair/chin/shoulders)"
+                    style={{ height: 100, maxWidth: 120, objectFit: 'contain', border: `1px solid ${C.borderStrong}`, display: 'block', background: '#000' }}
+                  />
+                  <div style={{ fontSize: 10, color: C.dim, marginTop: 4, fontFamily: C.mono }}>id-face-full (portrait)</div>
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginBottom: 6 }}>
+                  {full ? 'Standard + Full Portrait Crops' : 'Cropped Photo from Front ID'}
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.7, wordBreak: 'break-all' }}>
+                  <div>
+                    <span style={{ color: C.dim }}>Headshot:</span>{' '}
+                    <code style={{ color: C.accent, fontFamily: C.mono, fontSize: 10 }}>
+                      GET {breakUrl(headshotUrl)}
+                    </code>
+                  </div>
+                  {full && (
+                    <div>
+                      <span style={{ color: C.dim }}>Full portrait (ears, hair, shoulders):</span>{' '}
+                      <code style={{ color: C.accent, fontFamily: C.mono, fontSize: 10 }}>
+                        GET {breakUrl(fullUrl)}
+                      </code>
+                    </div>
+                  )}
+                  <div style={{ marginTop: 4, fontSize: 10, color: C.dim }}>
+                    Replace <code style={{ fontFamily: C.mono }}>{vid === '<verification_id>' ? '<verification_id>' : vid}</code>{' '}
+                    with the verification ID returned from <code style={{ fontFamily: C.mono }}>/initialize</code>.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Verification Overview Card */}
       <div style={cardStyle}>
@@ -300,14 +440,52 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
 
         {/* Liveness */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Liveness Detection</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div style={cardTitle}>Liveness Detection</div>
+            {lv?.mode && (
+              <span style={{ fontSize: 10, color: C.dim, fontFamily: C.mono, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {lv.mode === 'head_turn' ? 'head-turn' : 'passive'}{lv.provider ? ` · ${lv.provider}` : ''}
+              </span>
+            )}
+          </div>
           {lv ? (
             <>
               <ScoreBar value={lv.score} color={lv.passed ? C.green : C.red} label="Liveness Score" />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginBottom: 6 }}>
                 <span style={{ color: C.muted }}>Result</span>
                 <Badge passed={lv.passed} />
               </div>
+              {lv.threshold != null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.dim, fontFamily: C.mono, marginBottom: 4 }}>
+                  <span>threshold</span>
+                  <span>{(lv.threshold * 100).toFixed(0)}%</span>
+                </div>
+              )}
+              {Array.isArray(lv.signals) && lv.signals.length > 0 && (
+                <div style={{ marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                  <div style={{ fontSize: 10, color: C.dim, fontFamily: C.mono, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                    Signal breakdown
+                  </div>
+                  {lv.signals.map((s: any) => {
+                    const pct = Math.round((s.score ?? 0) * 100);
+                    const sigColor = pct >= 70 ? C.green : pct >= 50 ? C.amber : C.red;
+                    return (
+                      <div key={s.key} style={{ marginBottom: 5 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: C.mono, alignItems: 'baseline' }}>
+                          <span style={{ color: C.muted }}>{s.label || s.key}</span>
+                          <span style={{ color: sigColor, fontWeight: 600 }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: 2, background: C.border, overflow: 'hidden', marginTop: 2 }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: sigColor }} />
+                        </div>
+                        {s.note && (
+                          <div style={{ fontSize: 9, color: C.dim, marginTop: 1, fontFamily: C.mono }}>{s.note}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : (
             <span style={{ color: C.dim, fontSize: 12 }}>Not completed</span>

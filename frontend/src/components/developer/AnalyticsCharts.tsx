@@ -19,6 +19,7 @@ import {
 } from 'recharts'
 import { C } from '../../theme'
 import { API_BASE_URL } from '../../config/api'
+import { isCommunity } from '../../config/edition'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -491,8 +492,8 @@ export function AnalyticsCharts({ token }: { token: string }) {
         </ChartCard>
 
         <ChartCard
-          title="Quota Usage"
-          meta="monthly"
+          title={isCommunity ? 'Verifications' : 'Quota Usage'}
+          meta={isCommunity ? 'Community · unlimited' : 'monthly'}
           loading={loading}
           empty={!data?.quota}
         >

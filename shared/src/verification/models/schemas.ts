@@ -91,6 +91,10 @@ export const FrontExtractionResultSchema = z.object({
   authenticity: DocumentAuthenticitySchema,
   face_age: z.number().optional(),
   face_gender: z.string().optional(),
+  /** Tight-but-padded headshot crop (ears/hair/chin included). */
+  id_face_base64: z.string().optional().nullable(),
+  /** Generously padded crop trimmed to the visible ID photo box (full portrait incl. shoulders). */
+  id_face_full_base64: z.string().optional().nullable(),
 });
 
 export type FrontExtractionResult = z.infer<typeof FrontExtractionResultSchema>;
@@ -104,6 +108,15 @@ const QRPayloadSchema = z.object({
   id_number: z.string().optional(),
   expiry_date: z.string().optional(),
   nationality: z.string().optional(),
+  // Common fields from Ugandan / East-African national IDs (extracted from raw_text)
+  address: z.string().optional(),
+  district: z.string().optional(),
+  sub_county: z.string().optional(),
+  parish: z.string().optional(),
+  village: z.string().optional(),
+  issuing_country: z.string().optional(),
+  raw_text: z.string().optional(),
+  sex: z.string().optional(),
 }).passthrough(); // Allow additional barcode fields
 
 // --- MRZ Parse Result ---
@@ -160,12 +173,35 @@ export const CrossValidationResultSchema = z.object({
 
 export type CrossValidationResult = z.infer<typeof CrossValidationResultSchema>;
 
+// --- Liveness Signal Breakdown (per-signal scores from heuristic provider) ---
+export const LivenessSignalSchema = z.object({
+  /** Short key like 'fileSize', 'entropy', 'exif', 'moire'. */
+  key: z.string(),
+  /** Human-readable label for the UI. */
+  label: z.string(),
+  /** 0-1 sub-score (1 = most live-like). */
+  score: confidence,
+  /** Weight this signal contributed to the final weighted score. */
+  weight: z.number().min(0).max(1),
+  /** Optional note explaining a low score (e.g. 'No EXIF metadata'). */
+  note: z.string().optional(),
+});
+export type LivenessSignal = z.infer<typeof LivenessSignalSchema>;
+
 // --- Live Capture Result ---
 export const LiveCaptureResultSchema = z.object({
   face_embedding: z.array(z.number()).nullable(),
   face_confidence: confidence,
   liveness_passed: z.boolean(),
   liveness_score: confidence,
+  /** Liveness threshold used for the pass/fail decision. */
+  liveness_threshold: confidence.optional(),
+  /** Per-signal scores from the liveness provider (for transparency / manual review). */
+  liveness_signals: z.array(LivenessSignalSchema).optional(),
+  /** Which liveness provider/module produced the score. */
+  liveness_provider: z.string().optional(),
+  /** 'passive' (single image heuristics) or 'head_turn' (active challenge). */
+  liveness_mode: z.enum(['passive', 'head_turn']).optional(),
   deepfake_check: z.object({
     isReal: z.boolean(),
     realProbability: z.number().min(0).max(1),
@@ -201,11 +237,42 @@ export const VoiceMatchResultSchema = z.object({
 
 export type VoiceMatchResult = z.infer<typeof VoiceMatchResultSchema>;
 
+// --- Detailed Segmented Rejection Breakdown ---
+export const RejectionBreakdownSchema = z.object({
+  category: z.enum([
+    'document_quality',
+    'expiration',
+    'data_mismatch',
+    'liveness_spoof',
+    'face_mismatch',
+    'sanctions',
+    'tampering',
+    'underage',
+    'other',
+  ]),
+  summary: z.string(),
+  field_mismatches: z.array(z.object({
+    field: z.string(),
+    expected: z.string().optional(),
+    actual: z.string().optional(),
+    reason: z.string(),
+  })).optional(),
+  score_details: z.object({
+    required_threshold: z.number().optional(),
+    actual_score: z.number().optional(),
+    metric_name: z.string().optional(),
+  }).optional(),
+  details: z.array(z.string()),
+});
+
+export type RejectionBreakdown = z.infer<typeof RejectionBreakdownSchema>;
+
 // --- Gate Result (shared across all 7 gates) ---
 export const GateResultSchema = z.object({
   passed: z.boolean(),
   rejection_reason: RejectionReasonEnum.nullable(),
   rejection_detail: z.string().nullable(),
+  rejection_breakdown: RejectionBreakdownSchema.optional().nullable(),
   user_message: z.string().nullable(),
 });
 
@@ -317,11 +384,19 @@ export interface SessionState {
   issuing_country: string | null; // ISO 3166-1 alpha-2
   rejection_reason: RejectionReasonType | null;
   rejection_detail: string | null;
+  rejection_breakdown?: RejectionBreakdown | null;
   front_extraction: FrontExtractionResult | null;
   back_extraction: BackExtractionResult | null;
   cross_validation: CrossValidationResult | null;
   face_match: FaceMatchResult | null;
-  liveness: { passed: boolean; score: number } | null;
+  liveness: {
+    passed: boolean;
+    score: number;
+    threshold?: number;
+    provider?: string;
+    mode?: 'passive' | 'head_turn';
+    signals?: LivenessSignal[];
+  } | null;
   deepfake_check: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening: AMLScreeningSessionResult | null;
   age_estimation: AgeEstimationResult | null;

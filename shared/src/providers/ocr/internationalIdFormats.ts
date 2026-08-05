@@ -493,7 +493,43 @@ export const INTERNATIONAL_ID_FORMATS: Record<string, CountryIdFormat> = {
     ],
   },
 
-  // -- Asia-Pacific ----------------------------------------------
+  // -- Africa ---------------------------------------------------
+
+  UG: {
+    country: 'UG',
+    document_types: [
+      {
+        type: 'national_id',
+        // Ugandan NIN (e.g. CM85012345678A or CF...)
+        id_number_regex: /^(?:CM|CF|UG)?[A-Z0-9]{12,14}$/i,
+        field_labels: {
+          name: [/surname/i, /given\s*names?/i, /full\s*name/i, /\bname\b/i],
+          date_of_birth: [/date\s*of\s*birth/i, /dob/i, /born/i],
+          expiry_date: [/date\s*of\s*expiry/i, /expiry\s*date/i, /expires/i, /expiry/i, /\bexp\b/i],
+          id_number: [/nin\b/i, /national\s*id\s*no/i, /id\s*no/i, /number/i, /card\s*no/i, /card\s*number/i],
+          nationality: [/nationality/i, /citizenship/i, /\buga\b/i, /ugandan/i],
+          address: [/district/i, /county/i, /sub-county/i, /sub\s*county/i, /parish/i, /village/i, /address/i],
+          issuing_authority: [],
+        },
+        date_format: 'DMY',
+        has_mrz: false,
+      },
+      {
+        type: 'drivers_license',
+        id_number_regex: /^[A-Z0-9]{6,15}$/i,
+        field_labels: ENGLISH_LABELS,
+        date_format: 'DMY',
+        has_mrz: false,
+      },
+      {
+        type: 'passport',
+        id_number_regex: /^[A-Z0-9]{6,12}$/i,
+        field_labels: ENGLISH_LABELS,
+        date_format: 'DMY',
+        has_mrz: true,
+      },
+    ],
+  },
 
   JP: {
     country: 'JP',
@@ -650,7 +686,8 @@ export function getCountryFormat(
   country: string,
   documentType: string,
 ): CountryDocFormat | null {
-  const countryDef = INTERNATIONAL_ID_FORMATS[country.toUpperCase()];
+  const normCountry = country.toUpperCase() === 'UGA' ? 'UG' : country.toUpperCase();
+  const countryDef = INTERNATIONAL_ID_FORMATS[normCountry];
   if (!countryDef) return null;
 
   return countryDef.document_types.find(d => d.type === documentType) || null;
@@ -660,7 +697,8 @@ export function getCountryFormat(
  * Validate a document number against the country-specific format.
  */
 export function validateIdNumber(country: string, documentType: string, idNumber: string): boolean {
-  const format = getCountryFormat(country, documentType);
+  const normCountry = country.toUpperCase() === 'UGA' ? 'UG' : country.toUpperCase();
+  const format = getCountryFormat(normCountry, documentType);
   if (!format) return true; // No format = no validation constraint
   return format.id_number_regex.test(idNumber);
 }
@@ -692,6 +730,8 @@ export const INTERNATIONAL_HEADER_NOISE = new Set([
   'identiteitskaart', 'rijbewijs',
   // Albanian
   'republika e shqip\u00ebris\u00eb', 'let\u00ebrnjoftim', 'kart\u00eb identiteti',
+  // Uganda
+  'republic of uganda', 'national identity card', 'nira', 'national identification and registration authority',
   // Japanese
   '\u904b\u8ee2\u514d\u8a31\u8a3c', '\u30de\u30a4\u30ca\u30f3\u30d0\u30fc\u30ab\u30fc\u30c9',
   // Korean

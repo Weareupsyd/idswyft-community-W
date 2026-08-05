@@ -28,6 +28,8 @@ import {
   decryptSecret,
   FLOW_PRESETS,
   applyPassportOverride,
+  cropBothAsDataUris,
+  mergeLabeledAddressFields,
 } from '@idswyft/shared';
 import type {
   HeadTurnLivenessMetadata,
@@ -379,25 +381,17 @@ async function extractFrontDocument(
     }
   }
 
-  // Extract cropped ID face photo as base64
+  // Extract face crops as base64 — two variants:
+  //  - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
+  //  - id_face_full_base64:  generously padded crop trimmed to the printed ID photo box
+  //                          (full portrait including shoulders)
   let idFaceBase64: string | null = null;
+  let idFaceFullBase64: string | null = null;
   if (imageBuffer && faceBoundingBox) {
     try {
-      const meta = await sharp(imageBuffer).metadata();
-      if (meta.width && meta.height) {
-        const left = Math.max(0, Math.floor(faceBoundingBox.x));
-        const top = Math.max(0, Math.floor(faceBoundingBox.y));
-        const width = Math.min(meta.width - left, Math.ceil(faceBoundingBox.width));
-        const height = Math.min(meta.height - top, Math.ceil(faceBoundingBox.height));
-
-        if (width > 10 && height > 10) {
-          const cropBuffer = await sharp(imageBuffer)
-            .extract({ left, top, width, height })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-          idFaceBase64 = `data:image/jpeg;base64,${cropBuffer.toString('base64')}`;
-        }
-      }
+      const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
+      idFaceBase64 = crops.id_face_base64;
+      idFaceFullBase64 = crops.id_face_full_base64;
     } catch (err) {
       logger.warn('Failed to extract cropped face from ID image', { error: err });
     }
@@ -419,6 +413,7 @@ async function extractFrontDocument(
     mrz_from_front: mrzFromFront,
     authenticity,
     id_face_base64: idFaceBase64,
+    id_face_full_base64: idFaceFullBase64,
   };
 }
 
@@ -516,6 +511,18 @@ async function extractBackDocument(
     } catch (err) {
       logger.debug('Back document OCR fallback did not yield additional fields', { error: err });
     }
+  }
+
+  // Fill in any blank Ugandan address fields (village/parish/sub_county/district/address)
+  // by parsing "LABEL: value" lines directly out of the barcode raw_text. This
+  // aligns barcode_data with what's visible in raw_text so fields don't come back
+  // empty when the barcode scan successfully read the lines but the structured
+  // parser (AAMVA/PDF417/MRZ) didn't emit them.
+  if (finalQrPayload) {
+    const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
+    const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
+    finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
+    if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = issuingCountry || 'UG';
   }
 
   // Build MRZ result for Gate 2
@@ -1584,9 +1591,10 @@ router.post('/:verification_id/back-document',
 
     // Run back extraction (country context flows to Gate 2 via session state)
     const savedState = await loadSessionState(verification_id);
+    const issuingCountry = savedState?.issuing_country || 'UG';
     const backResult = engineClient.isEnabled()
-      ? await engineClient.extractBack(req.file.buffer)
-      : await extractBackDocument(documentPath, document.id, savedState?.issuing_country || 'UG');
+      ? await engineClient.extractBack(req.file.buffer, { issuingCountry })
+      : await extractBackDocument(documentPath, document.id, issuingCountry);
 
     // Ephemeral cleanup: demo files are deleted immediately after extraction
     if (source === 'demo') {
@@ -2506,7 +2514,25 @@ router.get('/:verification_id/status',
   })
 );
 
-// ─── Cropped ID Face photo retrieval (developer-scoped) ─────────────────────
+// ─── ID Face photo retrieval (developer-scoped) ─────────────────────────────
+// Helper shared by /id-face and /id-face-full
+async function loadIdFaceForRequest(req: Request, verification_id: string) {
+  if (req.sessionVerificationId && req.sessionVerificationId !== verification_id) {
+    const err: any = new Error('Verification request not found');
+    err.statusCode = 404;
+    throw err;
+  }
+  const verification = await requireOwnedVerification(req, verification_id);
+  const isSandbox = (verification as any).is_sandbox || false;
+  const session = await hydrateSession(verification_id, isSandbox);
+  return { verification, state: session.getState() };
+}
+
+/**
+ * GET /api/v2/verify/:id/id-face
+ * Returns the tight-but-padded headshot crop (ears/hair/chin preserved).
+ * Kept for backward compatibility with existing integrations.
+ */
 router.get('/:verification_id/id-face',
   authenticateAPIKeyOrHandoff,
   [
@@ -2515,16 +2541,7 @@ router.get('/:verification_id/id-face',
   validate,
   catchAsync(async (req: Request, res: Response) => {
     const { verification_id } = req.params;
-
-    if (req.sessionVerificationId && req.sessionVerificationId !== verification_id) {
-      return res.status(404).json({ error: 'Verification request not found' });
-    }
-
-    const verification = await requireOwnedVerification(req, verification_id);
-    const isSandbox = (verification as any).is_sandbox || false;
-
-    const session = await hydrateSession(verification_id, isSandbox);
-    const state = session.getState();
+    const { state } = await loadIdFaceForRequest(req, verification_id);
 
     const idFaceBase64 = state.front_extraction?.id_face_base64 ?? null;
     if (!idFaceBase64) {
@@ -2540,6 +2557,46 @@ router.get('/:verification_id/id-face',
       success: true,
       verification_id,
       id_face_base64: idFaceBase64,
+      face_confidence: state.front_extraction?.face_confidence ?? null,
+    });
+  })
+);
+
+/**
+ * GET /api/v2/verify/:id/id-face-full
+ * Returns the full ID portrait (generously padded, whitespace-trimmed to the
+ * printed photo box) so ears, hair, chin and shoulders are all captured.
+ * Also echoes the tight headshot for convenience, so clients that need both
+ * crops only need one round trip.
+ */
+router.get('/:verification_id/id-face-full',
+  authenticateAPIKeyOrHandoff,
+  [
+    param('verification_id').isUUID().withMessage('Invalid verification ID'),
+  ],
+  validate,
+  catchAsync(async (req: Request, res: Response) => {
+    const { verification_id } = req.params;
+    const { state } = await loadIdFaceForRequest(req, verification_id);
+
+    const standard = state.front_extraction?.id_face_base64 ?? null;
+    const full = (state.front_extraction as any)?.id_face_full_base64 ?? null;
+
+    if (!standard && !full) {
+      return res.status(404).json({
+        success: false,
+        verification_id,
+        id_face_base64: null,
+        id_face_full_base64: null,
+        message: 'Cropped ID face image not available for this verification',
+      });
+    }
+
+    res.json({
+      success: true,
+      verification_id,
+      id_face_base64: standard,
+      id_face_full_base64: full,
       face_confidence: state.front_extraction?.face_confidence ?? null,
     });
   })

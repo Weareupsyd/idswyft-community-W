@@ -91,7 +91,10 @@ export const FrontExtractionResultSchema = z.object({
   authenticity: DocumentAuthenticitySchema,
   face_age: z.number().optional(),
   face_gender: z.string().optional(),
+  /** Tight-but-padded headshot crop (ears/hair/chin included). */
   id_face_base64: z.string().optional().nullable(),
+  /** Generously padded crop trimmed to the visible ID photo box (full portrait incl. shoulders). */
+  id_face_full_base64: z.string().optional().nullable(),
 });
 
 export type FrontExtractionResult = z.infer<typeof FrontExtractionResultSchema>;
@@ -105,6 +108,15 @@ const QRPayloadSchema = z.object({
   id_number: z.string().optional(),
   expiry_date: z.string().optional(),
   nationality: z.string().optional(),
+  // Common fields from Ugandan / East-African national IDs (extracted from raw_text)
+  address: z.string().optional(),
+  district: z.string().optional(),
+  sub_county: z.string().optional(),
+  parish: z.string().optional(),
+  village: z.string().optional(),
+  issuing_country: z.string().optional(),
+  raw_text: z.string().optional(),
+  sex: z.string().optional(),
 }).passthrough(); // Allow additional barcode fields
 
 // --- MRZ Parse Result ---

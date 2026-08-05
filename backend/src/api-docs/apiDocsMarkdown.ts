@@ -349,6 +349,49 @@ Returns the full verification record: OCR data, cross-validation, liveness, face
 | Step 3 (back doc) | \`cross_validation_results\` is not null | If not failed, proceed to Step 4 |
 | Step 4 (live capture) | \`final_result\` is not null | Verification complete |
 
+The status response also includes \`id_face_base64\` (padded headshot crop) and \`id_face_full_base64\` (full-ID-portrait crop, whitespace-trimmed so ears, hair, chin, and the printed photo box are all captured).
+
+### Retrieve ID Face Photo (Crop)
+
+\`\`\`
+GET /api/v2/verify/:id/id-face
+\`\`\`
+
+Returns the padded + whitespace-trimmed headshot crop of the photo on the ID card (data URI, base64 JPEG). This replaces the previous tight-bounding-box crop which could clip ears on tightly-detected faces.
+
+**Response (200):**
+
+\`\`\`json
+{
+  "success": true,
+  "verification_id": "...",
+  "id_face_base64": "data:image/jpeg;base64,/9j/4AAQ...",
+  "face_confidence": 0.998
+}
+\`\`\`
+
+### Retrieve Full ID Portrait (New)
+
+\`\`\`
+GET /api/v2/verify/:id/id-face-full
+\`\`\`
+
+Returns the full ID-card portrait — a generously-padded crop that is trimmed back to the visible photo box so ears, hair, chin and shoulders are all captured. Also echoes the tight headshot for convenience.
+
+**Response (200):**
+
+\`\`\`json
+{
+  "success": true,
+  "verification_id": "...",
+  "id_face_base64": "data:image/jpeg;base64,...",
+  "id_face_full_base64": "data:image/jpeg;base64,...",
+  "face_confidence": 0.998
+}
+\`\`\`
+
+Both endpoints require either a valid \`X-API-Key\` or a session token scoped to the verification. Returns 404 if the face image is not yet available (front document still processing or face not detected).
+
 ---
 
 ## Optional: Phone OTP Verification

@@ -201,6 +201,7 @@ export function buildVerificationResponse(input: VerificationResponseInput) {
     rejection_detail: state.rejection_detail,
     rejection_breakdown: state.rejection_breakdown ?? null,
     id_face_base64: state.front_extraction?.id_face_base64 ?? null,
+    id_face_full_base64: (state.front_extraction as any)?.id_face_full_base64 ?? null,
     failure_reason: state.rejection_detail,
     manual_review_reason: verification.manual_review_reason
       || (state.cross_validation?.verdict === 'REVIEW' ? 'Cross-validation requires review' : null)

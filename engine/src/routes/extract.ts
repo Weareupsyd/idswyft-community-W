@@ -26,6 +26,8 @@ import {
   HeadTurnLivenessMetadataSchema,
   SharpTamperDetector, DocumentZoneValidator,
   createDeepfakeDetector,
+  cropBothAsDataUris,
+  mergeLabeledAddressFields,
 } from '@idswyft/shared';
 import type {
   HeadTurnLivenessMetadata,
@@ -274,25 +276,17 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
     // Resolve document type: use auto-classified type if available, otherwise raw input
     const resolvedDocType = ocrData?.detected_document_type || documentType;
 
-    // 4. Extract cropped ID face photo as base64
+    // 4. Extract face crops as base64 — two variants:
+    //    - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
+    //    - id_face_full_base64:  generously padded crop trimmed to the printed photo box
+    //                            (full portrait including shoulders)
     let idFaceBase64: string | null = null;
+    let idFaceFullBase64: string | null = null;
     if (imageBuffer && faceBoundingBox) {
       try {
-        const meta = await sharp(imageBuffer).metadata();
-        if (meta.width && meta.height) {
-          const left = Math.max(0, Math.floor(faceBoundingBox.x));
-          const top = Math.max(0, Math.floor(faceBoundingBox.y));
-          const width = Math.min(meta.width - left, Math.ceil(faceBoundingBox.width));
-          const height = Math.min(meta.height - top, Math.ceil(faceBoundingBox.height));
-
-          if (width > 10 && height > 10) {
-            const cropBuffer = await sharp(imageBuffer)
-              .extract({ left, top, width, height })
-              .jpeg({ quality: 85 })
-              .toBuffer();
-            idFaceBase64 = `data:image/jpeg;base64,${cropBuffer.toString('base64')}`;
-          }
-        }
+        const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
+        idFaceBase64 = crops.id_face_base64;
+        idFaceFullBase64 = crops.id_face_full_base64;
       } catch (err) {
         logger.warn('Failed to extract cropped face from ID image', { error: err });
       }
@@ -346,6 +340,7 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
       face_age: faceAge,
       face_gender: faceGender,
       id_face_base64: idFaceBase64,
+      id_face_full_base64: idFaceFullBase64,
     };
 
     logger.info('Front extraction complete', {
@@ -466,6 +461,19 @@ router.post('/back', upload.single('file'), async (req: Request, res: Response) 
       } catch (err) {
         logger.debug('Back document OCR fallback in engine', { error: err });
       }
+    }
+
+    // 5. Merge labeled address fields (VILLAGE/PARISH/S.COUNTY/DISTRICT) parsed
+    //    directly from the barcode raw_text — this fills in Ugandan-ID fields
+    //    even when the OCR branch above didn't run or produced fewer fields,
+    //    and ensures fields like address/district/parish/village line up with
+    //    what's visible in raw_text rather than returning empty strings.
+    if (finalQrPayload) {
+      const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
+      const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
+      finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
+      // Always propagate issuing_country if not already set
+      if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = reqIssuingCountry;
     }
 
     const hasMrz = mrzResult !== null;

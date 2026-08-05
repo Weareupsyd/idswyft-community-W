@@ -307,9 +307,14 @@ export async function extractFront(
 /**
  * Extract back document data via the engine worker.
  */
-export async function extractBack(imageBuffer: Buffer): Promise<BackExtractionResult> {
-  logger.info('Calling engine: /extract/back');
-  return callEngine<BackExtractionResult>('/extract/back', imageBuffer, {});
+export async function extractBack(
+  imageBuffer: Buffer,
+  opts?: { issuingCountry?: string },
+): Promise<BackExtractionResult> {
+  logger.info('Calling engine: /extract/back', { issuingCountry: opts?.issuingCountry });
+  const metadata: Record<string, string> = {};
+  if (opts?.issuingCountry) metadata.issuing_country = opts.issuingCountry;
+  return callEngine<BackExtractionResult>('/extract/back', imageBuffer, metadata);
 }
 
 /**

@@ -8,6 +8,20 @@ export { encryptSecret, decryptSecret, maskApiKey } from './utils/encryption.js'
 // Sentry scrubbing — used by both backend and engine instrument.ts
 export { scrubSentryEvent, redactPII, scrubText, PII_FIELDS } from './utils/sentryScrub.js';
 
+// Face cropping (shared between backend and engine so ID face crops are consistent)
+export {
+  cropFaceFromBuffer,
+  cropBothFaceVariants,
+  cropBothAsDataUris,
+  STANDARD_FACE_CROP,
+  FULL_FACE_CROP,
+} from './utils/faceCrop.js';
+export type { FaceBoundingBox, CropOptions } from './utils/faceCrop.js';
+
+// Labeled "KEY: value" field extraction (used for Ugandan-ID address fields in raw_text)
+export { extractLabeledFields, mergeLabeledAddressFields } from './utils/labeledFieldParser.js';
+export type { UgAddressFields } from './utils/labeledFieldParser.js';
+
 // Core types
 export type { OCRData, DocumentType } from './types/index.js';
 

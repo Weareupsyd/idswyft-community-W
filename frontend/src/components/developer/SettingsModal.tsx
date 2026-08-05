@@ -35,6 +35,7 @@ const tabs: Array<{ id: SettingsTab; label: string; icon: React.ComponentType<{ 
 
 interface SettingsModalProps {
   token: string
+  isOperator?: boolean
   onClose: () => void
   onAccountDeleted: () => void
 }

@@ -180,6 +180,78 @@ export class InternationalExtractor extends BaseExtractor {
       }
     }
 
+    // Uganda specific field extraction (NIN, Card No on front; District, Sub-county, Parish, Village on back)
+    if (country === 'UG') {
+      // NIN (National Identification Number: CM... / CF...)
+      this.findField(flatLines, [/nin\b/i, /national\s*id\s*no/i], (value, conf) => {
+        const cleaned = value.replace(/\s+/g, '');
+        const ninM = cleaned.match(/\b((?:CM|CF|UG)?[A-Z0-9]{12,14})\b/i);
+        if (ninM) {
+          ocrData.document_number = ninM[1].toUpperCase();
+          (ocrData as any).nin = ninM[1].toUpperCase();
+          ocrData.confidence_scores!.document_number = conf;
+          return;
+        }
+      });
+
+      // Card No (printed on front of Ugandan ID)
+      this.findField(flatLines, [/card\s*no/i, /card\s*number/i, /serial\s*no/i], (value, conf) => {
+        const cleaned = value.replace(/\s+/g, '');
+        if (/^[A-Z0-9]{6,12}$/i.test(cleaned)) {
+          (ocrData as any).card_number = cleaned;
+          ocrData.confidence_scores!.card_number = conf;
+        }
+      });
+
+      // Nationality on card is UGA / UGANDAN
+      if (ocrData.nationality) {
+        if (/UGA|UGANDAN/i.test(ocrData.nationality)) {
+          ocrData.nationality = 'UGA';
+        }
+      }
+
+      // Back ID fields: District, County / Sub-county, Parish, Village
+      this.findField(flatLines, [/district/i], (value, conf) => {
+        const cleaned = this.stripLeadingLabelNoise(value);
+        if (cleaned && !this.isLabelOrNoise(cleaned)) {
+          (ocrData as any).district = cleaned;
+          ocrData.confidence_scores!.district = conf;
+        }
+      });
+
+      this.findField(flatLines, [/sub-county/i, /sub\s*county/i, /county/i], (value, conf) => {
+        const cleaned = this.stripLeadingLabelNoise(value);
+        if (cleaned && !this.isLabelOrNoise(cleaned)) {
+          (ocrData as any).sub_county = cleaned;
+          ocrData.confidence_scores!.sub_county = conf;
+        }
+      });
+
+      this.findField(flatLines, [/parish/i], (value, conf) => {
+        const cleaned = this.stripLeadingLabelNoise(value);
+        if (cleaned && !this.isLabelOrNoise(cleaned)) {
+          (ocrData as any).parish = cleaned;
+          ocrData.confidence_scores!.parish = conf;
+        }
+      });
+
+      this.findField(flatLines, [/village/i], (value, conf) => {
+        const cleaned = this.stripLeadingLabelNoise(value);
+        if (cleaned && !this.isLabelOrNoise(cleaned)) {
+          (ocrData as any).village = cleaned;
+          ocrData.confidence_scores!.village = conf;
+        }
+      });
+
+      if (!ocrData.address) {
+        const addrParts = [(ocrData as any).village, (ocrData as any).parish, (ocrData as any).sub_county, (ocrData as any).district, 'Uganda'].filter(Boolean);
+        if (addrParts.length > 1) {
+          ocrData.address = addrParts.join(', ');
+          ocrData.confidence_scores!.address = 0.85;
+        }
+      }
+    }
+
     ocrData.issuing_country = country;
   }
 

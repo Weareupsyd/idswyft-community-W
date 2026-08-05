@@ -274,7 +274,31 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
     // Resolve document type: use auto-classified type if available, otherwise raw input
     const resolvedDocType = ocrData?.detected_document_type || documentType;
 
-    // 4. Tamper detection + zone validation
+    // 4. Extract cropped ID face photo as base64
+    let idFaceBase64: string | null = null;
+    if (imageBuffer && faceBoundingBox) {
+      try {
+        const meta = await sharp(imageBuffer).metadata();
+        if (meta.width && meta.height) {
+          const left = Math.max(0, Math.floor(faceBoundingBox.x));
+          const top = Math.max(0, Math.floor(faceBoundingBox.y));
+          const width = Math.min(meta.width - left, Math.ceil(faceBoundingBox.width));
+          const height = Math.min(meta.height - top, Math.ceil(faceBoundingBox.height));
+
+          if (width > 10 && height > 10) {
+            const cropBuffer = await sharp(imageBuffer)
+              .extract({ left, top, width, height })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            idFaceBase64 = `data:image/jpeg;base64,${cropBuffer.toString('base64')}`;
+          }
+        }
+      } catch (err) {
+        logger.warn('Failed to extract cropped face from ID image', { error: err });
+      }
+    }
+
+    // 5. Tamper detection + zone validation
     let authenticity: FrontExtractionResult['authenticity'] = undefined;
     try {
       const tamperResult = await new SharpTamperDetector().analyze(imageBuffer);
@@ -321,6 +345,7 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
       authenticity,
       face_age: faceAge,
       face_gender: faceGender,
+      id_face_base64: idFaceBase64,
     };
 
     logger.info('Front extraction complete', {
@@ -411,6 +436,36 @@ router.post('/back', upload.single('file'), async (req: Request, res: Response) 
         TD1: 'MRZ_TD1', TD2: 'MRZ_TD2', TD3: 'MRZ_TD3',
       };
       barcodeFormat = mrzFormatMap[mrzResult.format] || null;
+    }
+
+    // 4. Fallback: If barcode and MRZ were not found or if issuing country is UG (or national_id),
+    // run OCR on back document image to extract text fields (e.g. District, Sub-county, Parish, Village, Address)
+    const reqIssuingCountry = req.body.issuing_country || 'UG';
+    if (!finalQrPayload || Object.values(finalQrPayload).every(v => !v) || reqIssuingCountry === 'UG') {
+      try {
+        const backOcr = await ocrService.processDocumentFromBuffer(imageBuffer, 'national_id', reqIssuingCountry);
+        if (backOcr) {
+          finalQrPayload = {
+            ...(finalQrPayload || {}),
+            first_name: (backOcr as any).first_name || (finalQrPayload as any)?.first_name || '',
+            last_name: (backOcr as any).last_name || (finalQrPayload as any)?.last_name || '',
+            full_name: backOcr.name || (backOcr as any).full_name || (finalQrPayload as any)?.full_name || '',
+            date_of_birth: backOcr.date_of_birth || (finalQrPayload as any)?.date_of_birth || '',
+            id_number: backOcr.document_number || (backOcr as any).id_number || (finalQrPayload as any)?.id_number || '',
+            expiry_date: backOcr.expiration_date || (backOcr as any).expiry_date || (finalQrPayload as any)?.expiry_date || '',
+            nationality: backOcr.nationality || (finalQrPayload as any)?.nationality || '',
+            address: backOcr.address || (finalQrPayload as any)?.address || [(backOcr as any).village, (backOcr as any).parish, (backOcr as any).sub_county, (backOcr as any).district, 'Uganda'].filter(Boolean).join(', ') || '',
+            issuing_country: backOcr.issuing_country || reqIssuingCountry,
+            district: (backOcr as any).district || '',
+            sub_county: (backOcr as any).sub_county || (backOcr as any).county || '',
+            parish: (backOcr as any).parish || '',
+            village: (backOcr as any).village || '',
+            raw_text: backOcr.raw_text || rawText || '',
+          } as any;
+        }
+      } catch (err) {
+        logger.debug('Back document OCR fallback in engine', { error: err });
+      }
     }
 
     const hasMrz = mrzResult !== null;

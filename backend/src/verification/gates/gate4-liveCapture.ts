@@ -24,13 +24,24 @@ export function evaluateGate4(liveCapture: LiveCaptureResult): GateResult {
       passed: false,
       rejection_reason: 'LIVENESS_FAILED',
       rejection_detail: `Liveness score ${liveCapture.liveness_score.toFixed(2)} — anti-spoofing check failed`,
+      rejection_breakdown: {
+        category: 'liveness_spoof',
+        summary: 'Live capture failed anti-spoofing check',
+        score_details: {
+          required_threshold: 0.60,
+          actual_score: Math.round(liveCapture.liveness_score * 100) / 100,
+          metric_name: 'liveness_score',
+        },
+        details: [
+          `Liveness score ${(liveCapture.liveness_score * 100).toFixed(1)}% is below the required threshold`,
+          'Screen photo, printed paper photo, or video injection attempt detected',
+        ],
+      },
       user_message: 'We could not verify that you are present. Please try again with a live photo, not a printed picture or screen.',
     };
   }
 
   // Face detection: pass if embedding exists OR confidence is high enough.
-  // Embedding extraction requires TensorFlow which is optional;
-  // detectFacePresence() returns a confidence score even without TF.
   const hasEmbedding = liveCapture.face_embedding && liveCapture.face_embedding.length > 0;
   const hasHighConfidence = liveCapture.face_confidence >= FACE_CONFIDENCE_THRESHOLD;
 
@@ -39,6 +50,16 @@ export function evaluateGate4(liveCapture: LiveCaptureResult): GateResult {
       passed: false,
       rejection_reason: 'FACE_NOT_DETECTED',
       rejection_detail: `No face detected in live capture (confidence: ${liveCapture.face_confidence.toFixed(2)}, threshold: ${FACE_CONFIDENCE_THRESHOLD})`,
+      rejection_breakdown: {
+        category: 'document_quality',
+        summary: 'No human face detected in live capture',
+        score_details: {
+          required_threshold: FACE_CONFIDENCE_THRESHOLD,
+          actual_score: Math.round(liveCapture.face_confidence * 100) / 100,
+          metric_name: 'face_confidence',
+        },
+        details: ['Ensure your face is centered, unobstructed, and well-lit in the camera viewfinder'],
+      },
       user_message: 'We could not detect your face. Please ensure your face is clearly visible and well-lit.',
     };
   }

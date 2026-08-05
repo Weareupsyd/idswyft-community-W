@@ -71,6 +71,14 @@ export interface VerificationRequest {
   } | null;
   rejection_reason?: string | null;
   rejection_detail?: string | null;
+  rejection_breakdown?: {
+    category: 'document_quality' | 'expiration' | 'data_mismatch' | 'liveness_spoof' | 'face_mismatch' | 'sanctions' | 'tampering' | 'underage' | 'other';
+    summary: string;
+    field_mismatches?: Array<{ field: string; expected?: string; actual?: string; reason: string }>;
+    score_details?: { required_threshold?: number; actual_score?: number; metric_name?: string };
+    details: string[];
+  } | null;
+  id_face_base64?: string | null;
   failure_reason?: string | null;
   front_document_uploaded?: boolean;
   back_document_uploaded?: boolean;

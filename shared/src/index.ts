@@ -72,6 +72,7 @@ export {
   FaceMatchResultSchema,
   VoiceMatchResultSchema,
   GateResultSchema,
+  RejectionBreakdownSchema,
   FLOW_PRESETS,
   applyPassportOverride,
 } from './verification/models/schemas.js';
@@ -83,6 +84,7 @@ export type {
   FaceMatchResult,
   VoiceMatchResult,
   GateResult,
+  RejectionBreakdown,
   SessionState,
   AgeEstimationResult,
   VelocityAnalysisResult,

@@ -32,6 +32,11 @@ export function evaluateGate2(
         passed: false,
         rejection_reason: 'BACK_BARCODE_NOT_FOUND',
         rejection_detail: 'No barcode (PDF417, QR, DataMatrix) detected on back of document',
+        rejection_breakdown: {
+          category: 'document_quality',
+          summary: 'No barcode detected on back of driver license or ID card',
+          details: ['PDF417 2D barcode was not detected or was unreadable'],
+        },
         user_message: 'We could not read the barcode on the back of your ID. Please retake the photo ensuring the barcode is clearly visible.',
       };
     } else {
@@ -40,6 +45,11 @@ export function evaluateGate2(
         passed: false,
         rejection_reason: 'BACK_BARCODE_NOT_FOUND',
         rejection_detail: 'No barcode or MRZ detected on back of document',
+        rejection_breakdown: {
+          category: 'document_quality',
+          summary: 'No barcode or Machine Readable Zone detected on back of document',
+          details: ['Neither barcode nor MRZ text was detected on the back ID image'],
+        },
         user_message: 'We could not read the barcode or machine-readable zone on the back of your ID. Please retake the photo ensuring the back is clearly visible.',
       };
     }
@@ -51,6 +61,11 @@ export function evaluateGate2(
       passed: false,
       rejection_reason: 'BACK_MRZ_CHECKSUM_FAILED',
       rejection_detail: 'MRZ checksum validation failed — possible physical tampering',
+      rejection_breakdown: {
+        category: 'tampering',
+        summary: 'Machine-readable zone checksum validation failed',
+        details: ['MRZ check digits do not match calculated mathematical checksums'],
+      },
       user_message: 'We detected an issue with your document. Please ensure you are using an original, unaltered ID.',
     };
   }
@@ -65,6 +80,14 @@ export function evaluateGate2(
         passed: false,
         rejection_reason: 'BACK_MRZ_BARCODE_MISMATCH',
         rejection_detail: `Front MRZ does not match back MRZ — strong fraud signal`,
+        rejection_breakdown: {
+          category: 'data_mismatch',
+          summary: 'Front MRZ data does not match back MRZ data',
+          field_mismatches: [
+            { field: 'mrz', reason: 'Front document MRZ string does not match back document MRZ string' },
+          ],
+          details: ['Front and back images appear to belong to two different documents'],
+        },
         user_message: 'The front and back of your document do not appear to match. Please ensure both images are from the same ID.',
       };
     }

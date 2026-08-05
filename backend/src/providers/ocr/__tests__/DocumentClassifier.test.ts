@@ -124,16 +124,16 @@ describe('classifyDocument', () => {
 
   // ── Default fallback ────────────────────────────────────────
 
-  it('falls back to drivers_license for empty text', () => {
+  it('falls back to national_id for empty text', () => {
     const result = classifyDocument('');
-    expect(result.type).toBe('drivers_license');
+    expect(result.type).toBe('national_id');
     expect(result.confidence).toBe(0.50);
     expect(result.signals).toContain('default_fallback');
   });
 
-  it('falls back to drivers_license for garbage text', () => {
+  it('falls back to national_id for garbage text', () => {
     const result = classifyDocument('xkcd lorem ipsum dolor sit amet 12345');
-    expect(result.type).toBe('drivers_license');
+    expect(result.type).toBe('national_id');
     expect(result.confidence).toBe(0.50);
     expect(result.signals).toContain('default_fallback');
   });

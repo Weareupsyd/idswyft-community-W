@@ -168,6 +168,68 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
         )}
       </div>
 
+      {/* Rejection Breakdown (Segmented details) */}
+      {verificationRequest?.rejection_breakdown && (
+        <div style={{ ...cardStyle, background: C.redDim, border: `1px solid rgba(248,113,113,0.3)` }}>
+          <div style={{ ...cardTitle, color: C.red }}>Rejection Details (Segmented Breakdown)</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+            {verificationRequest.rejection_breakdown.summary}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontFamily: C.mono, textTransform: 'uppercase' as const, padding: '2px 8px', background: C.red, color: '#fff', fontWeight: 600 }}>
+              Category: {verificationRequest.rejection_breakdown.category}
+            </span>
+            {verificationRequest.rejection_breakdown.score_details?.actual_score != null && (
+              <span style={{ fontSize: 11, fontFamily: C.mono, color: C.muted }}>
+                Score: {verificationRequest.rejection_breakdown.score_details.actual_score} (required: {verificationRequest.rejection_breakdown.score_details.required_threshold})
+              </span>
+            )}
+          </div>
+
+          {verificationRequest.rejection_breakdown.field_mismatches && verificationRequest.rejection_breakdown.field_mismatches.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid rgba(248,113,113,0.2)` }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, marginBottom: 4 }}>Specific Field Mismatches:</div>
+              {verificationRequest.rejection_breakdown.field_mismatches.map((fm: any, idx: number) => (
+                <div key={idx} style={{ fontSize: 12, color: C.muted, marginBottom: 4, paddingLeft: 8, borderLeft: `2px solid ${C.red}` }}>
+                  <strong style={{ color: C.text }}>{fm.field}:</strong> {fm.reason}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {verificationRequest.rejection_breakdown.details && verificationRequest.rejection_breakdown.details.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, marginBottom: 4 }}>Detailed Signals:</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: C.muted }}>
+                {verificationRequest.rejection_breakdown.details.map((d: string, idx: number) => (
+                  <li key={idx} style={{ marginBottom: 2 }}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Extracted Cropped ID Face Card */}
+      {(verificationRequest?.id_face_base64 || (verificationRequest?.ocr_data as any)?.id_face_base64) && (
+        <div style={cardStyle}>
+          <div style={cardTitle}>Extracted ID Face Photo</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <img
+              src={verificationRequest?.id_face_base64 || (verificationRequest?.ocr_data as any)?.id_face_base64}
+              alt="Cropped Face from ID"
+              style={{ width: 80, height: 80, objectFit: 'cover', border: `1px solid ${C.borderStrong}` }}
+            />
+            <div>
+              <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>Cropped Photo from Front ID</div>
+              <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>
+                Available via endpoint: <code style={{ color: C.accent, fontFamily: C.mono }}>GET /api/v2/verify/:id/id-face</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Verification Overview Card */}
       <div style={cardStyle}>
         <div style={cardTitle}>Overview</div>

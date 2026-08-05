@@ -188,4 +188,33 @@ describe('Cross-Validator Engine', () => {
     // first_name='JOHN' + last_name='DOE' should match 'JOHN DOE'
     expect(result.field_scores.full_name.score).toBe(1.0);
   });
+
+  it('returns PASS for Ugandan National ID with complementary front and back details', () => {
+    const frontUG = makeFront({
+      full_name: 'MUKASA DAVID',
+      id_number: 'CM85012345678A',
+      date_of_birth: '1985-04-12',
+      expiry_date: '2030-04-12',
+      nationality: 'UGANDAN',
+      issuing_country: 'UG',
+    });
+    const backUG = makeBack({
+      district: 'KAMPALA',
+      sub_county: 'CENTRAL',
+      parish: 'CIVIC CENTRE',
+      village: 'STREET 1',
+      place_of_birth: 'KAMPALA',
+      date_of_issue: '2020-04-12',
+      issuing_country: 'UG',
+    });
+    delete (backUG.qr_payload as any).full_name;
+    delete (backUG.qr_payload as any).id_number;
+    delete (backUG.qr_payload as any).date_of_birth;
+
+    const result = crossValidate(frontUG, backUG);
+    expect(result.verdict).toBe('PASS');
+    expect(result.overall_score).toBe(1.0);
+    expect(result.has_critical_failure).toBe(false);
+    expect(result.document_expired).toBe(false);
+  });
 });

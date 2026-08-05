@@ -32,6 +32,7 @@ import type {
   AgeEstimationResult,
   VelocityAnalysisResult,
   GeoAnalysisResult,
+  RejectionBreakdown,
 } from '@idswyft/shared';
 
 /**
@@ -55,6 +56,7 @@ export interface StepResult {
   passed: boolean;
   rejection_reason: string | null;
   rejection_detail: string | null;
+  rejection_breakdown?: RejectionBreakdown | null;
   user_message: string | null;
 }
 
@@ -205,11 +207,17 @@ export class VerificationSession {
     if (!dobStr) {
       this.state.rejection_reason = 'DOB_NOT_FOUND' as any;
       this.state.rejection_detail = 'Date of birth could not be extracted from document';
+      this.state.rejection_breakdown = {
+        category: 'document_quality',
+        summary: 'Date of birth was missing or unreadable on the uploaded document',
+        details: ['OCR could not extract a valid date of birth from the front ID photo'],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'DOB_NOT_FOUND',
         rejection_detail: 'Date of birth could not be extracted from document',
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: 'We could not read the date of birth on your document. Please try again with a clearer image.',
       };
     }
@@ -219,11 +227,17 @@ export class VerificationSession {
     if (!dob) {
       this.state.rejection_reason = 'DOB_NOT_FOUND' as any;
       this.state.rejection_detail = `Date of birth format unrecognized: ${dobStr}`;
+      this.state.rejection_breakdown = {
+        category: 'document_quality',
+        summary: 'Date of birth format on document was unrecognized',
+        details: [`Raw date string "${dobStr}" could not be parsed as a valid date`],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'DOB_NOT_FOUND',
         rejection_detail: `Date of birth format unrecognized: ${dobStr}`,
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: 'We could not parse the date of birth on your document. Please try again with a clearer image.',
       };
     }
@@ -239,11 +253,22 @@ export class VerificationSession {
     if (!isOfAge) {
       this.state.rejection_reason = 'UNDERAGE' as any;
       this.state.rejection_detail = `Subject does not meet the minimum age requirement of ${ageThreshold}`;
+      this.state.rejection_breakdown = {
+        category: 'underage',
+        summary: 'Subject does not meet minimum age requirement',
+        score_details: {
+          required_threshold: ageThreshold,
+          actual_score: age,
+          metric_name: 'calculated_age',
+        },
+        details: [`Calculated age ${age} is below the required threshold of ${ageThreshold}`],
+      };
       this.transition(VerificationStatus.HARD_REJECTED);
       return {
         passed: false,
         rejection_reason: 'UNDERAGE',
         rejection_detail: `Subject does not meet the minimum age requirement of ${ageThreshold}`,
+        rejection_breakdown: this.state.rejection_breakdown,
         user_message: `You must be at least ${ageThreshold} years old to proceed.`,
         age_verification: ageVerification,
       };
@@ -274,6 +299,17 @@ export class VerificationSession {
     }
 
     this.state.back_extraction = backResult;
+
+    // Merge extracted back details into session OCR data so all fields from front AND back are combined
+    if (backResult.qr_payload && this.state.front_extraction?.ocr) {
+      for (const [key, val] of Object.entries(backResult.qr_payload)) {
+        if (val && typeof val === 'string' && val.trim().length > 0) {
+          if (!this.state.front_extraction.ocr[key]) {
+            this.state.front_extraction.ocr[key] = val;
+          }
+        }
+      }
+    }
 
     // Auto-trigger Step 3: Cross-Validation
     this.transition(VerificationStatus.CROSS_VALIDATING);
@@ -455,6 +491,7 @@ export class VerificationSession {
   private hardReject(gate: GateResult): StepResult {
     this.state.rejection_reason = gate.rejection_reason as any;
     this.state.rejection_detail = gate.rejection_detail;
+    this.state.rejection_breakdown = gate.rejection_breakdown ?? null;
     this.transition(VerificationStatus.HARD_REJECTED);
     return {
       passed: false,

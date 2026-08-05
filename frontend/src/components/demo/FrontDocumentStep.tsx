@@ -62,8 +62,7 @@ export const FrontDocumentStep: React.FC<FrontDocumentStepProps> = ({
             color: C.text, fontFamily: C.mono, fontSize: 12, outline: 'none',
           }}
         >
-          <option value="">Select document type</option>
-          <option value="national_id">National ID</option>
+          <option value="national_id">National ID (Uganda)</option>
           <option value="drivers_license">Driver's License</option>
           <option value="passport">Passport</option>
           <option value="other">Other</option>

@@ -379,6 +379,30 @@ async function extractFrontDocument(
     }
   }
 
+  // Extract cropped ID face photo as base64
+  let idFaceBase64: string | null = null;
+  if (imageBuffer && faceBoundingBox) {
+    try {
+      const meta = await sharp(imageBuffer).metadata();
+      if (meta.width && meta.height) {
+        const left = Math.max(0, Math.floor(faceBoundingBox.x));
+        const top = Math.max(0, Math.floor(faceBoundingBox.y));
+        const width = Math.min(meta.width - left, Math.ceil(faceBoundingBox.width));
+        const height = Math.min(meta.height - top, Math.ceil(faceBoundingBox.height));
+
+        if (width > 10 && height > 10) {
+          const cropBuffer = await sharp(imageBuffer)
+            .extract({ left, top, width, height })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+          idFaceBase64 = `data:image/jpeg;base64,${cropBuffer.toString('base64')}`;
+        }
+      }
+    } catch (err) {
+      logger.warn('Failed to extract cropped face from ID image', { error: err });
+    }
+  }
+
   return {
     ocr: {
       full_name: ocrData?.name || '',
@@ -394,12 +418,15 @@ async function extractFrontDocument(
     ocr_confidence: avgConfidence,
     mrz_from_front: mrzFromFront,
     authenticity,
+    id_face_base64: idFaceBase64,
   };
 }
 
 /** Run back barcode extraction and build BackExtractionResult */
 async function extractBackDocument(
   documentPath: string,
+  documentId?: string,
+  issuingCountry?: string,
 ): Promise<BackExtractionResult> {
   let barcodeData;
   try {
@@ -459,6 +486,36 @@ async function extractBackDocument(
       TD1: 'MRZ_TD1', TD2: 'MRZ_TD2', TD3: 'MRZ_TD3',
     };
     barcodeFormat = mrzFormatMap[mrzResult.format] || null;
+  }
+
+  // Fallback: If barcode and MRZ were not found or if issuing country is UG (or non-US national ID),
+  // run OCR on back document image to extract text fields (e.g. District, Sub-county, Parish, Village, Address)
+  if (!finalQrPayload || Object.values(finalQrPayload).every(v => !v) || issuingCountry === 'UG') {
+    try {
+      const docId = documentId || 'back_doc';
+      const backOcr = await ocrService.processDocument(docId, documentPath, 'national_id', issuingCountry || 'UG');
+      if (backOcr) {
+        finalQrPayload = {
+          ...(finalQrPayload || {}),
+          first_name: (backOcr as any).first_name || (finalQrPayload as any)?.first_name || '',
+          last_name: (backOcr as any).last_name || (finalQrPayload as any)?.last_name || '',
+          full_name: backOcr.name || (backOcr as any).full_name || (finalQrPayload as any)?.full_name || '',
+          date_of_birth: backOcr.date_of_birth || (finalQrPayload as any)?.date_of_birth || '',
+          id_number: backOcr.document_number || (backOcr as any).id_number || (finalQrPayload as any)?.id_number || '',
+          expiry_date: backOcr.expiration_date || (backOcr as any).expiry_date || (finalQrPayload as any)?.expiry_date || '',
+          nationality: backOcr.nationality || (finalQrPayload as any)?.nationality || '',
+          address: backOcr.address || (finalQrPayload as any)?.address || [(backOcr as any).village, (backOcr as any).parish, (backOcr as any).sub_county, (backOcr as any).district, 'Uganda'].filter(Boolean).join(', ') || '',
+          issuing_country: backOcr.issuing_country || issuingCountry || 'UG',
+          district: (backOcr as any).district || '',
+          sub_county: (backOcr as any).sub_county || (backOcr as any).county || '',
+          parish: (backOcr as any).parish || '',
+          village: (backOcr as any).village || '',
+          raw_text: backOcr.raw_text || rawText || '',
+        } as any;
+      }
+    } catch (err) {
+      logger.debug('Back document OCR fallback did not yield additional fields', { error: err });
+    }
   }
 
   // Build MRZ result for Gate 2
@@ -814,7 +871,7 @@ router.post('/initialize',
   ],
   validate,
   catchAsync(async (req: Request, res: Response) => {
-    const { user_id, document_type = 'auto', issuing_country } = req.body;
+    const { user_id, document_type = 'national_id', issuing_country = 'UG' } = req.body;
     const addons: VerificationAddons = req.body.addons || {};
     const source: VerificationSource = req.body.source || 'api';
     const verificationMode: string = req.body.verification_mode || 'full';
@@ -1145,7 +1202,7 @@ router.post('/:verification_id/front-document',
     }
 
     const { verification_id } = req.params;
-    const { document_type = 'auto', issuing_country } = req.body;
+    const { document_type = 'national_id', issuing_country = 'UG' } = req.body;
     const verification = await requireOwnedVerification(req, verification_id);
     const isSandbox = (verification as any).is_sandbox || false;
     const source: VerificationSource = (verification as any).source || 'api';
@@ -1518,9 +1575,10 @@ router.post('/:verification_id/back-document',
     });
 
     // Run back extraction (country context flows to Gate 2 via session state)
+    const savedState = await loadSessionState(verification_id);
     const backResult = engineClient.isEnabled()
       ? await engineClient.extractBack(req.file.buffer)
-      : await extractBackDocument(documentPath);
+      : await extractBackDocument(documentPath, document.id, savedState?.issuing_country || 'UG');
 
     // Ephemeral cleanup: demo files are deleted immediately after extraction
     if (source === 'demo') {
@@ -2433,6 +2491,45 @@ router.get('/:verification_id/status',
       flow,
     });
     res.json(response);
+  })
+);
+
+// ─── Cropped ID Face photo retrieval (developer-scoped) ─────────────────────
+router.get('/:verification_id/id-face',
+  authenticateAPIKeyOrHandoff,
+  [
+    param('verification_id').isUUID().withMessage('Invalid verification ID'),
+  ],
+  validate,
+  catchAsync(async (req: Request, res: Response) => {
+    const { verification_id } = req.params;
+
+    if (req.sessionVerificationId && req.sessionVerificationId !== verification_id) {
+      return res.status(404).json({ error: 'Verification request not found' });
+    }
+
+    const verification = await requireOwnedVerification(req, verification_id);
+    const isSandbox = (verification as any).is_sandbox || false;
+
+    const session = await hydrateSession(verification_id, isSandbox);
+    const state = session.getState();
+
+    const idFaceBase64 = state.front_extraction?.id_face_base64 ?? null;
+    if (!idFaceBase64) {
+      return res.status(404).json({
+        success: false,
+        verification_id,
+        id_face_base64: null,
+        message: 'Cropped ID face image not available for this verification',
+      });
+    }
+
+    res.json({
+      success: true,
+      verification_id,
+      id_face_base64: idFaceBase64,
+      face_confidence: state.front_extraction?.face_confidence ?? null,
+    });
   })
 );
 

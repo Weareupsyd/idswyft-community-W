@@ -70,6 +70,12 @@ describe('International ID Format Registry', () => {
       expect(validateIdNumber('SG', 'national_id', 'S1234567A')).toBe(true);
     });
 
+    // Uganda NIN
+    it('validates Ugandan National ID number (NIN)', () => {
+      expect(validateIdNumber('UG', 'national_id', 'CM85012345678A')).toBe(true);
+      expect(validateIdNumber('UG', 'national_id', 'CF91012345678B')).toBe(true);
+    });
+
     // Unknown country — no validation constraint
     it('passes validation for unknown country', () => {
       expect(validateIdNumber('XX', 'drivers_license', 'anything')).toBe(true);
@@ -78,7 +84,7 @@ describe('International ID Format Registry', () => {
 
   describe('registry coverage', () => {
     const expectedCountries = ['GB', 'CA', 'AU', 'NZ', 'DE', 'FR', 'IT', 'ES', 'NL',
-      'BR', 'MX', 'AR', 'JP', 'KR', 'IN', 'SG', 'PH', 'TH', 'VN'];
+      'BR', 'MX', 'AR', 'JP', 'KR', 'IN', 'SG', 'PH', 'TH', 'VN', 'UG'];
 
     for (const country of expectedCountries) {
       it(`has format definition for ${country}`, () => {

@@ -40,6 +40,11 @@ export function evaluateGate7(voiceMatch: VoiceMatchResult | null): GateResult {
       passed: false,
       rejection_reason: 'VOICE_CHALLENGE_FAILED',
       rejection_detail: `Spoken digits did not match expected challenge "${voiceMatch.challenge_digits}"`,
+      rejection_breakdown: {
+        category: 'liveness_spoof',
+        summary: 'Voice challenge digits mismatch',
+        details: [`Audio transcription did not match expected challenge digits "${voiceMatch.challenge_digits}"`],
+      },
       user_message: 'The spoken digits did not match the challenge. Please try again.',
     };
   }
@@ -50,6 +55,16 @@ export function evaluateGate7(voiceMatch: VoiceMatchResult | null): GateResult {
       passed: false,
       rejection_reason: 'VOICE_MATCH_FAILED',
       rejection_detail: `Voice similarity ${voiceMatch.similarity_score.toFixed(2)} below threshold ${voiceMatch.threshold_used.toFixed(2)}`,
+      rejection_breakdown: {
+        category: 'face_mismatch',
+        summary: 'Voice speaker similarity score below threshold',
+        score_details: {
+          required_threshold: voiceMatch.threshold_used,
+          actual_score: voiceMatch.similarity_score,
+          metric_name: 'voice_similarity',
+        },
+        details: [`Voice similarity score ${(voiceMatch.similarity_score * 100).toFixed(1)}% is below threshold ${(voiceMatch.threshold_used * 100).toFixed(0)}%`],
+      },
       user_message: 'Voice verification failed. Your voice does not match the enrollment recording.',
     };
   }

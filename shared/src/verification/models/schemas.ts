@@ -91,6 +91,7 @@ export const FrontExtractionResultSchema = z.object({
   authenticity: DocumentAuthenticitySchema,
   face_age: z.number().optional(),
   face_gender: z.string().optional(),
+  id_face_base64: z.string().optional().nullable(),
 });
 
 export type FrontExtractionResult = z.infer<typeof FrontExtractionResultSchema>;
@@ -201,11 +202,42 @@ export const VoiceMatchResultSchema = z.object({
 
 export type VoiceMatchResult = z.infer<typeof VoiceMatchResultSchema>;
 
+// --- Detailed Segmented Rejection Breakdown ---
+export const RejectionBreakdownSchema = z.object({
+  category: z.enum([
+    'document_quality',
+    'expiration',
+    'data_mismatch',
+    'liveness_spoof',
+    'face_mismatch',
+    'sanctions',
+    'tampering',
+    'underage',
+    'other',
+  ]),
+  summary: z.string(),
+  field_mismatches: z.array(z.object({
+    field: z.string(),
+    expected: z.string().optional(),
+    actual: z.string().optional(),
+    reason: z.string(),
+  })).optional(),
+  score_details: z.object({
+    required_threshold: z.number().optional(),
+    actual_score: z.number().optional(),
+    metric_name: z.string().optional(),
+  }).optional(),
+  details: z.array(z.string()),
+});
+
+export type RejectionBreakdown = z.infer<typeof RejectionBreakdownSchema>;
+
 // --- Gate Result (shared across all 7 gates) ---
 export const GateResultSchema = z.object({
   passed: z.boolean(),
   rejection_reason: RejectionReasonEnum.nullable(),
   rejection_detail: z.string().nullable(),
+  rejection_breakdown: RejectionBreakdownSchema.optional().nullable(),
   user_message: z.string().nullable(),
 });
 
@@ -317,6 +349,7 @@ export interface SessionState {
   issuing_country: string | null; // ISO 3166-1 alpha-2
   rejection_reason: RejectionReasonType | null;
   rejection_detail: string | null;
+  rejection_breakdown?: RejectionBreakdown | null;
   front_extraction: FrontExtractionResult | null;
   back_extraction: BackExtractionResult | null;
   cross_validation: CrossValidationResult | null;

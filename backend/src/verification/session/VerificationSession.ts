@@ -94,7 +94,14 @@ export interface SessionHydration {
   back_extraction?: BackExtractionResult | null;
   cross_validation?: CrossValidationResult | null;
   face_match?: FaceMatchResult | null;
-  liveness?: { passed: boolean; score: number } | null;
+  liveness?: {
+    passed: boolean;
+    score: number;
+    threshold?: number;
+    provider?: string;
+    mode?: 'passive' | 'head_turn';
+    signals?: Array<{ key: string; label: string; score: number; weight: number; note?: string }>;
+  } | null;
   deepfake_check?: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening?: {
     risk_level: string;
@@ -353,6 +360,10 @@ export class VerificationSession {
     this.state.liveness = {
       passed: liveResult.liveness_passed,
       score: liveResult.liveness_score,
+      threshold: (liveResult as any).liveness_threshold,
+      provider: (liveResult as any).liveness_provider,
+      mode: (liveResult as any).liveness_mode,
+      signals: (liveResult as any).liveness_signals,
     };
     this.state.deepfake_check = liveResult.deepfake_check ?? null;
 
@@ -401,7 +412,7 @@ export class VerificationSession {
     }
     this.state.face_match = faceMatchResult;
     // liveness + deepfake were already recorded above before Gate4 evaluation
-    // so that failed runs still surface their score to the UI.
+    // so that failed runs still surface their score/signals to the UI.
 
     const gate5 = evaluateGate5(faceMatchResult);
     if (!gate5.passed) {

@@ -1,4 +1,4 @@
-import { LivenessProvider } from '../types.js';
+import { LivenessProvider, LivenessAssessment, LivenessSignal } from '../types.js';
 import { logger } from '@/utils/logger.js';
 
 /**
@@ -45,17 +45,37 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
     aspectRatio: 0.05,
   };
 
+  private readonly signalLabels: Record<string, string> = {
+    fileSize: 'File size',
+    entropy: 'Byte entropy',
+    pixelVariance: 'Pixel variance',
+    exif: 'Camera EXIF',
+    jpegArtifacts: 'JPEG compression',
+    colorHistogram: 'Color distribution',
+    edgeDensity: 'Edge density / moiré',
+    aspectRatio: 'Aspect ratio',
+  };
+
   async assessLiveness(imageData: {
     buffer: Buffer;
     width?: number;
     height?: number;
     pixelData?: number[];
   }): Promise<number> {
+    return (await this.assessLivenessDetailed(imageData)).score;
+  }
+
+  async assessLivenessDetailed(imageData: {
+    buffer: Buffer;
+    width?: number;
+    height?: number;
+    pixelData?: number[];
+  }): Promise<LivenessAssessment> {
     const { buffer, width, height, pixelData } = imageData;
 
     if (!buffer || buffer.length === 0) {
       logger.warn('EnhancedHeuristicProvider: empty buffer');
-      return 0;
+      return { score: 0, signals: [] };
     }
 
     // If dimensions not provided, try to extract from buffer metadata
@@ -82,6 +102,7 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       colorScore,
       edgeScore,
       aspectScore,
+      metaResolved,
     ] = await Promise.all([
       this.scoreFileSize(buffer),
       this.scoreEntropy(buffer),
@@ -91,9 +112,10 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       this.scoreColorHistogram(buffer),
       this.scoreEdgeDensity(buffer),
       this.scoreAspectRatio(buffer, resolvedWidth, resolvedHeight),
+      this.readMetaForNotes(buffer).catch(() => null),
     ]);
 
-    const signals = {
+    const scoreMap: Record<string, number> = {
       fileSize: fileSizeScore,
       entropy: entropyScore,
       pixelVariance: pixelVarianceScore,
@@ -104,23 +126,61 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       aspectRatio: aspectScore,
     };
 
+    // Build per-signal notes
+    const notes: Record<string, string | undefined> = {};
+    const sizeKb = buffer.length / 1024;
+    notes.fileSize = `${sizeKb.toFixed(1)} KB`;
+    if (metaResolved?.hasExif) notes.exif = 'Camera EXIF present';
+    else notes.exif = 'No EXIF metadata (normal for browser canvas)';
+    if (metaResolved?.format) notes.exif = `${notes.exif} · ${metaResolved.format.toUpperCase()}`;
+    if (metaResolved?.width && metaResolved?.height) {
+      notes.aspectRatio = `${metaResolved.width}×${metaResolved.height}`;
+    }
+    if (edgeScore < 0.4) notes.edgeDensity = 'Moiré / periodic pattern detected';
+    else if (edgeScore < 0.6) notes.edgeDensity = 'Some periodic noise';
+    if (jpegScore < 0.5) notes.jpegArtifacts = 'Heavy JPEG re-compression';
+    if (colorScore < 0.5) notes.colorHistogram = 'Bimodal / synthetic color distribution';
+    if (entropyScore < 0.5) notes.entropy = 'Low entropy (flat or synthetic)';
+
+    const signals: LivenessSignal[] = Object.entries(scoreMap).map(([key, score]) => ({
+      key,
+      label: this.signalLabels[key] ?? key,
+      score: Math.max(0, Math.min(1, score)),
+      weight: this.weights[key as keyof typeof this.weights] ?? 0,
+      note: notes[key],
+    }));
+
     // Weighted average
     let weightedSum = 0;
     let totalWeight = 0;
-    for (const [key, score] of Object.entries(signals)) {
-      const weight = this.weights[key as keyof typeof this.weights];
-      weightedSum += score * weight;
-      totalWeight += weight;
+    for (const s of signals) {
+      weightedSum += s.score * s.weight;
+      totalWeight += s.weight;
     }
 
-    const finalScore = Math.max(0, Math.min(1, weightedSum / totalWeight));
+    const finalScore = Math.max(0, Math.min(1, totalWeight > 0 ? weightedSum / totalWeight : 0));
 
     logger.info('EnhancedHeuristicProvider: liveness assessment', {
-      signals,
+      signals: Object.fromEntries(signals.map(s => [s.key, +s.score.toFixed(3)])),
       finalScore: finalScore.toFixed(3),
     });
 
-    return finalScore;
+    return { score: finalScore, signals };
+  }
+
+  private async readMetaForNotes(buffer: Buffer): Promise<{ format?: string; width?: number; height?: number; hasExif: boolean } | null> {
+    try {
+      const sharp = (await import('sharp')).default;
+      const meta = await sharp(buffer).metadata();
+      return {
+        format: meta.format,
+        width: meta.width,
+        height: meta.height,
+        hasExif: !!meta.exif,
+      };
+    } catch {
+      return null;
+    }
   }
 
   // -- Signal 1: File Size ------------------------------------------

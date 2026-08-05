@@ -564,8 +564,12 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
     // 2. Liveness detection: head-turn (active) or passive
     let livenessScore = 0;
     let livenessPassed = false;
+    let livenessSignals: LiveCaptureResult['liveness_signals'];
+    let livenessMode: 'passive' | 'head_turn' = 'passive';
+    const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
     if (headTurnMetadata) {
+      livenessMode = 'head_turn';
       try {
         const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
         livenessScore = headTurnResult.score;
@@ -573,23 +577,30 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
         logger.info('Head-turn liveness verification complete', {
           score: livenessScore.toFixed(3),
           passed: livenessPassed,
+          threshold: livenessThreshold,
           reason: headTurnResult.reason,
         });
       } catch (err) {
         logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
+        livenessMode = 'passive';
       }
     }
 
-    if (!headTurnMetadata || (livenessScore === 0 && !livenessPassed)) {
+    if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
+      livenessMode = 'passive';
       try {
-        livenessScore = await livenessProvider.assessLiveness({ buffer: selfieBuffer });
-        const threshold = getLivenessThresholdSync(isSandbox);
-        livenessPassed = livenessScore >= threshold;
+        const detailed = livenessProvider.assessLivenessDetailed
+          ? await livenessProvider.assessLivenessDetailed({ buffer: selfieBuffer })
+          : { score: await livenessProvider.assessLiveness({ buffer: selfieBuffer }), signals: undefined as any };
+        livenessScore = detailed.score;
+        livenessSignals = detailed.signals;
+        livenessPassed = livenessScore >= livenessThreshold;
         logger.info('Passive liveness assessment complete', {
           provider: livenessProvider.name,
           score: livenessScore.toFixed(3),
-          threshold,
+          threshold: livenessThreshold,
           passed: livenessPassed,
+          signals: Object.fromEntries((detailed.signals || []).map((s: any) => [s.key, +s.score.toFixed(3)])),
         });
       } catch (err) {
         logger.error('Liveness provider failed, defaulting to fail-safe', { error: err });
@@ -623,6 +634,10 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
       face_confidence: faceConfidence,
       liveness_passed: livenessPassed,
       liveness_score: livenessScore,
+      liveness_threshold: livenessThreshold,
+      liveness_provider: livenessProvider.name,
+      liveness_mode: livenessMode,
+      liveness_signals: livenessSignals,
       deepfake_check,
       face_age: liveFaceAge,
       face_gender: liveFaceGender,

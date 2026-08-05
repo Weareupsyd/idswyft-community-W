@@ -173,12 +173,35 @@ export const CrossValidationResultSchema = z.object({
 
 export type CrossValidationResult = z.infer<typeof CrossValidationResultSchema>;
 
+// --- Liveness Signal Breakdown (per-signal scores from heuristic provider) ---
+export const LivenessSignalSchema = z.object({
+  /** Short key like 'fileSize', 'entropy', 'exif', 'moire'. */
+  key: z.string(),
+  /** Human-readable label for the UI. */
+  label: z.string(),
+  /** 0-1 sub-score (1 = most live-like). */
+  score: confidence,
+  /** Weight this signal contributed to the final weighted score. */
+  weight: z.number().min(0).max(1),
+  /** Optional note explaining a low score (e.g. 'No EXIF metadata'). */
+  note: z.string().optional(),
+});
+export type LivenessSignal = z.infer<typeof LivenessSignalSchema>;
+
 // --- Live Capture Result ---
 export const LiveCaptureResultSchema = z.object({
   face_embedding: z.array(z.number()).nullable(),
   face_confidence: confidence,
   liveness_passed: z.boolean(),
   liveness_score: confidence,
+  /** Liveness threshold used for the pass/fail decision. */
+  liveness_threshold: confidence.optional(),
+  /** Per-signal scores from the liveness provider (for transparency / manual review). */
+  liveness_signals: z.array(LivenessSignalSchema).optional(),
+  /** Which liveness provider/module produced the score. */
+  liveness_provider: z.string().optional(),
+  /** 'passive' (single image heuristics) or 'head_turn' (active challenge). */
+  liveness_mode: z.enum(['passive', 'head_turn']).optional(),
   deepfake_check: z.object({
     isReal: z.boolean(),
     realProbability: z.number().min(0).max(1),
@@ -366,7 +389,14 @@ export interface SessionState {
   back_extraction: BackExtractionResult | null;
   cross_validation: CrossValidationResult | null;
   face_match: FaceMatchResult | null;
-  liveness: { passed: boolean; score: number } | null;
+  liveness: {
+    passed: boolean;
+    score: number;
+    threshold?: number;
+    provider?: string;
+    mode?: 'passive' | 'head_turn';
+    signals?: LivenessSignal[];
+  } | null;
   deepfake_check: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening: AMLScreeningSessionResult | null;
   age_estimation: AgeEstimationResult | null;

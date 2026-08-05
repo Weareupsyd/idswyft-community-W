@@ -130,7 +130,17 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
 
   const cv = verificationRequest?.cross_validation_results;
   const fm = verificationRequest?.face_match_results;
-  const lv = verificationRequest?.liveness_results;
+  // Normalize liveness result shape — response uses snake_case, immediate
+  // POST response uses camelCase, and older records may use the legacy shape.
+  const lvRaw = verificationRequest?.liveness_results;
+  const lv = lvRaw ? {
+    passed: lvRaw.passed ?? lvRaw.liveness_passed,
+    score: lvRaw.score ?? lvRaw.liveness_score,
+    threshold: lvRaw.threshold ?? lvRaw.liveness_threshold,
+    provider: lvRaw.provider ?? lvRaw.liveness_provider,
+    mode: lvRaw.mode ?? lvRaw.liveness_mode,
+    signals: lvRaw.signals ?? lvRaw.liveness_signals ?? null,
+  } : null;
   const aml = verificationRequest?.aml_screening;
   const risk = verificationRequest?.risk_score;
   const ageEst = verificationRequest?.age_estimation;
@@ -430,14 +440,52 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
 
         {/* Liveness */}
         <div style={cardStyle}>
-          <div style={cardTitle}>Liveness Detection</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div style={cardTitle}>Liveness Detection</div>
+            {lv?.mode && (
+              <span style={{ fontSize: 10, color: C.dim, fontFamily: C.mono, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {lv.mode === 'head_turn' ? 'head-turn' : 'passive'}{lv.provider ? ` · ${lv.provider}` : ''}
+              </span>
+            )}
+          </div>
           {lv ? (
             <>
               <ScoreBar value={lv.score} color={lv.passed ? C.green : C.red} label="Liveness Score" />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginBottom: 6 }}>
                 <span style={{ color: C.muted }}>Result</span>
                 <Badge passed={lv.passed} />
               </div>
+              {lv.threshold != null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.dim, fontFamily: C.mono, marginBottom: 4 }}>
+                  <span>threshold</span>
+                  <span>{(lv.threshold * 100).toFixed(0)}%</span>
+                </div>
+              )}
+              {Array.isArray(lv.signals) && lv.signals.length > 0 && (
+                <div style={{ marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                  <div style={{ fontSize: 10, color: C.dim, fontFamily: C.mono, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                    Signal breakdown
+                  </div>
+                  {lv.signals.map((s: any) => {
+                    const pct = Math.round((s.score ?? 0) * 100);
+                    const sigColor = pct >= 70 ? C.green : pct >= 50 ? C.amber : C.red;
+                    return (
+                      <div key={s.key} style={{ marginBottom: 5 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: C.mono, alignItems: 'baseline' }}>
+                          <span style={{ color: C.muted }}>{s.label || s.key}</span>
+                          <span style={{ color: sigColor, fontWeight: 600 }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: 2, background: C.border, overflow: 'hidden', marginTop: 2 }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: sigColor }} />
+                        </div>
+                        {s.note && (
+                          <div style={{ fontSize: 9, color: C.dim, marginTop: 1, fontFamily: C.mono }}>{s.note}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : (
             <span style={{ color: C.dim, fontSize: 12 }}>Not completed</span>

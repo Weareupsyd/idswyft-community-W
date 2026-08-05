@@ -29,7 +29,7 @@ export type { OCRData, DocumentType } from './types/index.js';
 export type { FaceBufferDetectionResult } from './types/faceRecognition.js';
 
 // Provider types
-export type { OCRProvider, FaceMatchingProvider, LivenessProvider, ProviderConfig } from './providers/types.js';
+export type { OCRProvider, FaceMatchingProvider, LivenessProvider, LivenessSignal, LivenessAssessment, ProviderConfig } from './providers/types.js';
 
 // Liveness
 export { EnhancedHeuristicProvider } from './providers/liveness/EnhancedHeuristicProvider.js';

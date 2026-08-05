@@ -574,8 +574,12 @@ async function extractLiveCapture(
   // Liveness detection: head-turn (active) or passive heuristics
   let livenessScore = 0;
   let livenessPassed = false;
+  let livenessSignals: LiveCaptureResult['liveness_signals'];
+  let livenessMode: 'passive' | 'head_turn' = 'passive';
+  const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
   if (headTurnMetadata) {
+    livenessMode = 'head_turn';
     // Head-turn liveness — server-side face analysis of captured frames
     try {
       const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
@@ -584,30 +588,34 @@ async function extractLiveCapture(
       logger.info('Head-turn liveness verification complete', {
         score: livenessScore.toFixed(3),
         passed: livenessPassed,
+        threshold: livenessThreshold,
         reason: headTurnResult.reason,
         challenge: headTurnMetadata.challenge_direction,
         frameCount: headTurnMetadata.frames.length,
       });
     } catch (err) {
       logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
-      // Fall through to passive liveness below
+      livenessMode = 'passive';
     }
   }
 
-  if (!headTurnMetadata || (livenessScore === 0 && !livenessPassed)) {
+  if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
+    livenessMode = 'passive';
     // Passive liveness — image-based heuristics
     try {
-      livenessScore = await livenessProvider.assessLiveness({
-        buffer: selfieBuffer,
-      });
-      const threshold = getLivenessThresholdSync(isSandbox);
-      livenessPassed = livenessScore >= threshold;
+      const detailed = livenessProvider.assessLivenessDetailed
+        ? await livenessProvider.assessLivenessDetailed({ buffer: selfieBuffer })
+        : { score: await livenessProvider.assessLiveness({ buffer: selfieBuffer }), signals: undefined as any };
+      livenessScore = detailed.score;
+      livenessSignals = detailed.signals;
+      livenessPassed = livenessScore >= livenessThreshold;
       logger.info('Passive liveness assessment complete', {
         provider: livenessProvider.name,
         score: livenessScore.toFixed(3),
-        threshold,
+        threshold: livenessThreshold,
         passed: livenessPassed,
         isSandbox,
+        signals: Object.fromEntries((detailed.signals || []).map((s: any) => [s.key, +s.score.toFixed(3)])),
       });
     } catch (err) {
       logger.error('Liveness provider failed, defaulting to fail-safe', { error: err });
@@ -644,6 +652,10 @@ async function extractLiveCapture(
     face_confidence: faceConfidence,
     liveness_passed: livenessPassed,
     liveness_score: livenessScore,
+    liveness_threshold: livenessThreshold,
+    liveness_provider: livenessProvider.name,
+    liveness_mode: livenessMode,
+    liveness_signals: livenessSignals,
     deepfake_check,
   };
 }
@@ -764,6 +776,12 @@ async function fireWebhooksIfTerminal(
       data: {
         ocr_data: state.front_extraction?.ocr ?? undefined,
         face_match_score: state.face_match?.similarity_score ?? undefined,
+        liveness_score: state.liveness?.score ?? undefined,
+        liveness_passed: state.liveness?.passed ?? undefined,
+        liveness_threshold: state.liveness?.threshold ?? undefined,
+        liveness_provider: state.liveness?.provider ?? undefined,
+        liveness_mode: state.liveness?.mode ?? undefined,
+        liveness_signals: state.liveness?.signals ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -819,6 +837,8 @@ async function fireWebhookEvent(
       data: {
         ocr_data: state.front_extraction?.ocr ?? undefined,
         face_match_score: state.face_match?.similarity_score ?? undefined,
+        liveness_score: state.liveness?.score ?? undefined,
+        liveness_passed: state.liveness?.passed ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -2021,7 +2041,10 @@ router.post('/:verification_id/live-capture',
       liveness_results: {
         liveness_passed: liveResult.liveness_passed,
         liveness_score: liveResult.liveness_score,
-        liveness_mode: headTurnMetadata ? 'head_turn' : 'passive',
+        liveness_threshold: (liveResult as any).liveness_threshold,
+        liveness_provider: (liveResult as any).liveness_provider,
+        liveness_mode: (liveResult as any).liveness_mode || (headTurnMetadata ? 'head_turn' : 'passive'),
+        liveness_signals: (liveResult as any).liveness_signals ?? null,
       },
       deepfake_check: liveResult.deepfake_check ?? null,
       age_estimation: state.age_estimation ?? null,

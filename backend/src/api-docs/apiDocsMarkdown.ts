@@ -326,8 +326,20 @@ Zero ML dependencies on the client — just \`getUserMedia()\` + \`canvas.toData
   },
   "liveness_results": {
     "liveness_passed": true,
-    "liveness_score": 0.96,
-    "liveness_mode": "head_turn"
+    "liveness_score": 0.76,
+    "liveness_threshold": 0.55,
+    "liveness_provider": "enhanced-heuristic",
+    "liveness_mode": "passive",
+    "liveness_signals": [
+      { "key": "fileSize",        "label": "File size",          "score": 0.80, "weight": 0.06, "note": "54.2 KB" },
+      { "key": "entropy",         "label": "Byte entropy",       "score": 0.82, "weight": 0.14 },
+      { "key": "pixelVariance",   "label": "Pixel variance",    "score": 0.78, "weight": 0.10 },
+      { "key": "exif",            "label": "Camera EXIF",       "score": 0.50, "weight": 0.05, "note": "No EXIF metadata (normal for browser canvas)" },
+      { "key": "jpegArtifacts",   "label": "JPEG compression",  "score": 0.78, "weight": 0.18 },
+      { "key": "colorHistogram",  "label": "Color distribution","score": 0.80, "weight": 0.18 },
+      { "key": "edgeDensity",     "label": "Edge density / moiré","score": 0.82, "weight": 0.24 },
+      { "key": "aspectRatio",     "label": "Aspect ratio",      "score": 0.75, "weight": 0.05, "note": "480x640" }
+    ]
   },
   "final_result": "verified"
 }

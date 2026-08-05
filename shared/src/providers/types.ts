@@ -17,15 +17,42 @@ export interface FaceMatchingProvider {
 }
 
 // -- Liveness Provider -------------------------------------
+export interface LivenessSignal {
+  /** Short machine key (e.g. 'exif', 'moire', 'entropy'). */
+  key: string;
+  /** Human-readable label for UI. */
+  label: string;
+  /** 0..1 sub-score (1 = most live-like). */
+  score: number;
+  /** Weight contributed to the final weighted score. */
+  weight: number;
+  /** Optional note explaining the score. */
+  note?: string;
+}
+
+export interface LivenessAssessment {
+  /** Final weighted score 0..1. */
+  score: number;
+  /** Per-signal breakdown for transparency / manual review. */
+  signals: LivenessSignal[];
+}
+
 export interface LivenessProvider {
   readonly name: string;
-  /** Returns a liveness score 0..1 (1 = definitely live person) */
+  /** Returns a liveness score 0..1 (1 = definitely live person). */
   assessLiveness(imageData: {
     buffer: Buffer;
     width?: number;
     height?: number;
     pixelData?: number[];
   }): Promise<number>;
+  /** Returns score + per-signal breakdown (for reporting in status/webhooks). */
+  assessLivenessDetailed?(imageData: {
+    buffer: Buffer;
+    width?: number;
+    height?: number;
+    pixelData?: number[];
+  }): Promise<LivenessAssessment>;
 }
 
 // -- Provider Registry -------------------------------------

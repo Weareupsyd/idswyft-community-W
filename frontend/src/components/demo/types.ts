@@ -49,7 +49,29 @@ export interface VerificationRequest {
   } | null;
   liveness_results?: {
     passed?: boolean;
+    liveness_passed?: boolean;
     score?: number;
+    liveness_score?: number;
+    threshold?: number;
+    liveness_threshold?: number;
+    provider?: string;
+    liveness_provider?: string;
+    mode?: 'passive' | 'head_turn';
+    liveness_mode?: 'passive' | 'head_turn';
+    signals?: Array<{
+      key: string;
+      label: string;
+      score: number;
+      weight: number;
+      note?: string;
+    }> | null;
+    liveness_signals?: Array<{
+      key: string;
+      label: string;
+      score: number;
+      weight: number;
+      note?: string;
+    }> | null;
   } | null;
   aml_screening?: {
     risk_level?: string;

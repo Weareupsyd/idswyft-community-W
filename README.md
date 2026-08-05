@@ -9,6 +9,8 @@ Self-hostable identity verification platform for developers. Document OCR, barco
 **[Website](https://idswyft.app)** | **[Documentation](https://idswyft.app/docs)** | **[Demo](https://idswyft.app/demo)** | **[Pricing](https://idswyft.app/pricing)**
 
 ---
+chmod +x install.sh
+./install.sh --build
 
 ## Self-Host in One Command
 

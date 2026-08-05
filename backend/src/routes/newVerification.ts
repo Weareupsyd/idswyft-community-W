@@ -127,6 +127,7 @@ function createSession(isSandbox: boolean, hydration?: SessionHydration, addons?
     },
     computeFaceMatch,
     faceMatchThreshold: getFaceMatchingThresholdSync(isSandbox),
+    livenessThreshold: getLivenessThresholdSync(isSandbox),
     screenAML: amlEnabled
       ? async (fullName, dob, nationality) => screenAll(amlProviders, { full_name: fullName, date_of_birth: dob, nationality })
       : undefined,

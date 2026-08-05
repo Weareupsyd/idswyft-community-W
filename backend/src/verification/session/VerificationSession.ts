@@ -44,7 +44,7 @@ export const SESSION_PROTOCOL_ID = '6964737779667420627920646f6f626565';
 import { evaluateGate1 } from '../gates/gate1-frontDocument.js';
 import { evaluateGate2 } from '../gates/gate2-backDocument.js';
 import { evaluateGate3 } from '../gates/gate3-crossValidation.js';
-import { evaluateGate4 } from '../gates/gate4-liveCapture.js';
+import { evaluateGate4, DEFAULT_LIVENESS_THRESHOLD } from '../gates/gate4-liveCapture.js';
 import { evaluateGate5 } from '../gates/gate5-faceMatch.js';
 import { evaluateGate6 } from '../gates/gate6-amlScreening.js';
 import { evaluateGate7 } from '../gates/gate7-voiceMatch.js';
@@ -73,6 +73,8 @@ export interface SessionDeps {
   processLiveCapture: (buffer: Buffer) => Promise<LiveCaptureResult>;
   computeFaceMatch: (idEmbedding: number[], liveEmbedding: number[], threshold: number) => FaceMatchResult;
   faceMatchThreshold?: number;
+  /** Liveness anti-spoofing threshold (0.75 production, 0.65 sandbox) */
+  livenessThreshold?: number;
   /** Optional AML screening — returns null if disabled */
   screenAML?: (fullName: string, dob?: string | null, nationality?: string | null) => Promise<AMLScreeningResult | null>;
   /** Whether voice authentication is enabled for this developer */
@@ -337,12 +339,27 @@ export class VerificationSession {
    * Must be called when current_step === AWAITING_LIVE.
    * Auto-triggers Step 5 (face match) if Gate 4 passes.
    */
-  async submitLiveCapture(imageBuffer: Buffer): Promise<StepResult> {
+  async submitLiveCapture(imageBuffer: Buffer, livenessThreshold?: number): Promise<StepResult> {
     this.assertStep(VerificationStatus.AWAITING_LIVE);
     this.transition(VerificationStatus.LIVE_PROCESSING);
 
     const liveResult = await this.deps.processLiveCapture(imageBuffer);
-    const gate4 = evaluateGate4(liveResult);
+
+    // Record the liveness result BEFORE running Gate4 so that on failure the
+    // score/threshold are still persisted for the UI/response to show. Prior
+    // to this, a LIVENESS_FAILED hard-reject discarded the score and the
+    // dashboard showed "Liveness: Not completed" even though a selfie WAS
+    // processed and rejected.
+    this.state.liveness = {
+      passed: liveResult.liveness_passed,
+      score: liveResult.liveness_score,
+    };
+    this.state.deepfake_check = liveResult.deepfake_check ?? null;
+
+    const effectiveLivenessThreshold = livenessThreshold
+      ?? this.deps.livenessThreshold
+      ?? DEFAULT_LIVENESS_THRESHOLD;
+    const gate4 = evaluateGate4(liveResult, effectiveLivenessThreshold);
 
     if (!gate4.passed) {
       return this.hardReject(gate4);
@@ -383,11 +400,8 @@ export class VerificationSession {
       );
     }
     this.state.face_match = faceMatchResult;
-    this.state.liveness = {
-      passed: liveResult.liveness_passed,
-      score: liveResult.liveness_score,
-    };
-    this.state.deepfake_check = liveResult.deepfake_check ?? null;
+    // liveness + deepfake were already recorded above before Gate4 evaluation
+    // so that failed runs still surface their score to the UI.
 
     const gate5 = evaluateGate5(faceMatchResult);
     if (!gate5.passed) {

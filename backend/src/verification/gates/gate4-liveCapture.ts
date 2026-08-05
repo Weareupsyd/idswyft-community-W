@@ -16,24 +16,31 @@
 import type { LiveCaptureResult, GateResult } from '@idswyft/shared';
 
 const FACE_CONFIDENCE_THRESHOLD = 0.5;
+/** Default liveness threshold — kept in sync with verificationThresholds.LIVENESS.
+ *  The route handler passes the environment-appropriate value via
+ *  SessionDeps.livenessThreshold (0.55 prod / 0.45 sandbox). */
+const DEFAULT_LIVENESS_THRESHOLD = 0.55;
 
-export function evaluateGate4(liveCapture: LiveCaptureResult): GateResult {
+export function evaluateGate4(
+  liveCapture: LiveCaptureResult,
+  livenessThreshold: number = DEFAULT_LIVENESS_THRESHOLD,
+): GateResult {
   // Liveness failure takes precedence
   if (!liveCapture.liveness_passed) {
     return {
       passed: false,
       rejection_reason: 'LIVENESS_FAILED',
-      rejection_detail: `Liveness score ${liveCapture.liveness_score.toFixed(2)} — anti-spoofing check failed`,
+      rejection_detail: `Liveness score ${liveCapture.liveness_score.toFixed(2)} — anti-spoofing check failed (threshold ${livenessThreshold.toFixed(2)})`,
       rejection_breakdown: {
         category: 'liveness_spoof',
         summary: 'Live capture failed anti-spoofing check',
         score_details: {
-          required_threshold: 0.60,
+          required_threshold: Math.round(livenessThreshold * 100) / 100,
           actual_score: Math.round(liveCapture.liveness_score * 100) / 100,
           metric_name: 'liveness_score',
         },
         details: [
-          `Liveness score ${(liveCapture.liveness_score * 100).toFixed(1)}% is below the required threshold`,
+          `Liveness score ${(liveCapture.liveness_score * 100).toFixed(1)}% is below the required ${(livenessThreshold * 100).toFixed(0)}% threshold`,
           'Screen photo, printed paper photo, or video injection attempt detected',
         ],
       },

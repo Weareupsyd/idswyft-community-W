@@ -175,7 +175,8 @@ export function buildVerificationResponse(input: VerificationResponseInput) {
     ...((state as any).age_verification && { age_verification: (state as any).age_verification }),
     front_document_uploaded: !!state.front_extraction,
     back_document_uploaded: !!state.back_extraction,
-    live_capture_uploaded: !!state.face_match,
+    // true once a selfie has been processed (whether it passed liveness or not)
+    live_capture_uploaded: !!state.liveness,
     ocr_data: isAgeOnly ? undefined : (state.front_extraction?.ocr ?? null),
     barcode_data: state.back_extraction?.qr_payload ?? null,
     cross_validation_results: state.cross_validation ?? null,

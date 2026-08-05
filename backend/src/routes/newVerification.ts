@@ -1255,9 +1255,13 @@ router.post('/:verification_id/front-document',
     }
 
     // Store document in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `front_id_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'front_document.jpg'}`;
+
     const documentPath = await storageService.storeDocument(
       req.file.buffer,
-      req.file.originalname || 'front_document.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source
@@ -1557,9 +1561,13 @@ router.post('/:verification_id/back-document',
     }
 
     // Store document in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `back_id_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'back_document.jpg'}`;
+
     const documentPath = await storageService.storeDocument(
       req.file.buffer,
-      req.file.originalname || 'back_document.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source
@@ -1772,9 +1780,13 @@ router.post('/:verification_id/live-capture',
     }
 
     // Store selfie in the source-appropriate bucket
+    const timestamp = Date.now();
+    const isoDate = new Date(timestamp).toISOString().replace(/[:.]/g, '-');
+    const versionedName = `live_selfie_v${timestamp}_${isoDate}_processed_${req.file.originalname || 'selfie.jpg'}`;
+
     const selfiePath = await storageService.storeSelfie(
       req.file.buffer,
-      req.file.originalname || 'selfie.jpg',
+      versionedName,
       req.file.mimetype,
       verification_id,
       source

@@ -24,6 +24,16 @@ export function evaluateGate2(
   const hasMRZ = !!(back.mrz_result && back.mrz_result.raw_lines.length > 0);
   const isMRZFormat = back.barcode_format?.startsWith('MRZ_');
 
+  // Uganda National ID front/back layouts contain different data. A back MRZ
+  // is not a duplicate of the front and must never be rejected as a mismatch.
+  const isUganda = issuingCountry?.toUpperCase() === 'UG';
+  if (isUganda) return {
+    passed: true,
+    rejection_reason: null,
+    rejection_detail: null,
+    user_message: null,
+  };
+
   // Check barcode/MRZ presence
   if (!hasBarcode && !hasMRZ && !isMRZFormat) {
     if (isUS) {

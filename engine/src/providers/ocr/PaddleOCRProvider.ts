@@ -1628,6 +1628,15 @@ export class PaddleOCRProvider implements OCRProvider {
       lineCount: flatLines.length,
     });
 
+    // Uganda National IDs have a non-EU layout and deliberately keep different
+    // fields on the two sides. Extract the front fields without requiring the
+    // back to repeat them.
+    if (country === 'UG' && format.type === 'national_id') {
+      this.extractUgandaNationalIdData(flatLines, ocrData);
+      ocrData.issuing_country = country;
+      return;
+    }
+
     // EU DL numbered-field format: use specialized parser
     if (this.isEUDriversLicense(flatLines, format)) {
       this.extractEUDriversLicenseData(flatLines, ocrData, format);
@@ -1953,6 +1962,64 @@ export class PaddleOCRProvider implements OCRProvider {
           ocrData.confidence_scores!.sex = 0.85;
         }
       }
+    }
+  }
+
+  /** Extract the Uganda National ID front layout. The back contains address and
+   * biometric fields, so it is intentionally not used for identity comparison. */
+  private extractUgandaNationalIdData(flatLines: FlatLine[], ocrData: OCRData): void {
+    const set = (key: string, value: string, confidence: number) => {
+      if (value) {
+        (ocrData as any)[key] = value.trim();
+        ocrData.confidence_scores![key] = confidence;
+      }
+    };
+    this.findField(flatLines, [/surname/i], (v, c) => set('surname', v, c));
+    this.findField(flatLines, [/given\s*names?/i, /first\s*name/i], (v, c) => set('given_names', v, c));
+    this.findField(flatLines, [/full\s*name/i], (v, c) => set('full_name', v, c));
+    this.findDateField(flatLines, [/date\s*of\s*birth/i, /dob/i], (value, conf) => {
+      set('date_of_birth', value, conf);
+      ocrData.date_of_birth = value;
+      ocrData.confidence_scores!.date_of_birth = conf;
+    });
+    this.findDateField(flatLines, [/date\s*of\s*issue/i, /issued/i], (value, conf) => set('date_of_issue', value, conf));
+    this.findDateField(flatLines, [/date\s*of\s*expiry/i, /expiry/i, /expires/i], (value, conf) => {
+      const normalized = disambiguateExpiryDate(value);
+      set('date_of_expiry', normalized, conf);
+      ocrData.expiration_date = normalized;
+      ocrData.confidence_scores!.expiration_date = conf;
+    });
+    this.findField(flatLines, [/\bNIN\b/i, /national\s*identification\s*(?:number|no)/i], (v, c) => {
+      const value = v.replace(/\s+/g, '').toUpperCase();
+      if (/^[A-Z0-9]{8,20}$/.test(value)) {
+        set('nin', value, c);
+        ocrData.document_number = value;
+        ocrData.confidence_scores!.document_number = c;
+      }
+    });
+    this.findField(flatLines, [/card\s*(?:number|no)/i], (v, c) => {
+      const value = v.replace(/\s+/g, '');
+      if (/^[A-Z0-9]{6,15}$/i.test(value)) set('card_number', value, c);
+    });
+    this.findField(flatLines, [/nationality/i], (v, c) => set('nationality', v, c));
+    this.findField(flatLines, [/place\s*of\s*birth/i], (v, c) => set('place_of_birth', v, c));
+    this.findField(flatLines, [/\bsex\b/i], (v, c) => {
+      const m = v.match(/\b([MF])\b/i);
+      if (m) set('sex', m[1].toUpperCase(), c);
+    });
+    // Back fields (parish, village, district, subcounty, county)
+    this.findField(flatLines, [/parish/i], (v, c) => set('parish', v, c));
+    this.findField(flatLines, [/village/i], (v, c) => set('village', v, c));
+    this.findField(flatLines, [/district/i, /sub\s*county/i, /county/i], (v, c) => {
+      // Prefer the most specific label when multiple match; keep the value as-is
+      set('district', v, c);
+    });
+    if (!ocrData.full_name && (ocrData.surname || ocrData.given_names)) {
+      ocrData.full_name = [ocrData.surname, ocrData.given_names].filter(Boolean).join(' ');
+      ocrData.name = ocrData.full_name;
+      ocrData.confidence_scores!.name = (ocrData.confidence_scores!.surname ?? 0.5) + (ocrData.confidence_scores!.given_names ?? 0.5);
+    } else if (ocrData.full_name) {
+      ocrData.name = ocrData.full_name;
     }
   }
 

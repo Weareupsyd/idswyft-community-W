@@ -182,6 +182,7 @@ export interface WebhookPayload {
     liveness_provider?: string;
     liveness_mode?: string;
     liveness_signals?: Array<{ key: string; label: string; score: number; weight: number; note?: string }>;
+    liveness_checks?: Record<string, { passed: boolean; weight: number; detail?: string }>;
     manual_review_reason?: string;
     failure_reason?: string;
   };

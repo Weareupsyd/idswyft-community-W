@@ -402,6 +402,8 @@ export interface SessionState {
     provider?: string;
     mode?: 'passive' | 'head_turn';
     signals?: LivenessSignal[];
+    /** Per-check breakdown from active liveness verification. */
+    checks?: Record<string, { passed: boolean; weight: number; detail?: string }>;
   } | null;
   deepfake_check: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening: AMLScreeningSessionResult | null;

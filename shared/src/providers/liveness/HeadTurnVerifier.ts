@@ -113,33 +113,52 @@ export async function verifyHeadTurnLiveness(
 
   // Separate motion frames for turn checks
   const motionFrames = frameDetections.filter(
-    (fd) => ['turn_start', 'turn_peak', 'turn_return'].includes(fd.frame.phase),
+    (fd) => ['turn_start', 'turn_peak', 'turn_return', 'turn_burst'].includes(fd.frame.phase),
   );
 
-  // -- Check 2: Head turn detected --
+  // -- Check 2: Head turn detected -- (peak selected from burst frames)
   const turnStart = motionFrames.find((fd) => fd.frame.phase === 'turn_start');
-  const turnPeak = motionFrames.find((fd) => fd.frame.phase === 'turn_peak');
   const turnReturn = motionFrames.find((fd) => fd.frame.phase === 'turn_return');
 
   let startYaw = 0;
-  let peakYaw = 0;
   let returnYaw = 0;
 
   if (turnStart?.detection) {
     startYaw = estimateYawFromLandmarks(turnStart.detection.landmarks);
   }
-  if (turnPeak?.detection) {
-    peakYaw = estimateYawFromLandmarks(turnPeak.detection.landmarks);
-  }
   if (turnReturn?.detection) {
     returnYaw = estimateYawFromLandmarks(turnReturn.detection.landmarks);
+  }
+
+  // Peak selection: the client captures a burst of frames during the turn
+  // ('turn_burst') plus a final 'turn_peak'. The user may have already started
+  // returning to center by the time the client-asserted peak frame fired, so we
+  // pick the frame with the LARGEST |yaw delta| from start among all candidates.
+  // This makes the check robust to capture timing instead of trusting the
+  // client's assertion about when the turn peak happened.
+  const peakCandidates = motionFrames.filter(
+    (fd) => fd.detection !== null && ['turn_peak', 'turn_burst'].includes(fd.frame.phase),
+  );
+
+  let peakYaw = 0;
+  let peakFramePhase: string | undefined;
+  let maxYawDelta = -1;
+  for (const fd of peakCandidates) {
+    const yaw = estimateYawFromLandmarks(fd.detection!.landmarks);
+    const delta = Math.abs(yaw - startYaw);
+    if (delta > maxYawDelta) {
+      maxYawDelta = delta;
+      peakYaw = yaw;
+      peakFramePhase = fd.frame.phase;
+    }
   }
 
   const yawDelta = Math.abs(peakYaw - startYaw);
   checks.head_turn_detected = {
     passed: yawDelta >= MIN_YAW_DELTA,
     weight: WEIGHTS.head_turn_detected,
-    detail: `yaw delta: ${yawDelta.toFixed(1)} degrees (need >= ${MIN_YAW_DELTA})`,
+    detail: `yaw delta: ${yawDelta.toFixed(1)} degrees (need >= ${MIN_YAW_DELTA})` +
+      (peakFramePhase ? `, peak from ${peakFramePhase} (${peakCandidates.length} candidate frames)` : ''),
   };
 
   // -- Check 3: Correct direction --
@@ -201,7 +220,10 @@ export async function verifyHeadTurnLiveness(
     if (check.passed) score += check.weight;
   }
 
-  const passed = score >= PASS_THRESHOLD;
+  // Direction is a hard requirement: a user turning the OPPOSITE way of the
+  // challenge (0.80 score otherwise) must not pass — that would make the
+  // challenge trivially ignorable by an attacker.
+  const passed = score >= PASS_THRESHOLD && checks.correct_direction.passed;
   const failedChecks = Object.entries(checks)
     .filter(([, c]) => !c.passed)
     .map(([name]) => name);

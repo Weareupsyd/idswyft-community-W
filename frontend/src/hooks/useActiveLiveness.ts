@@ -60,6 +60,8 @@ export interface UseActiveLivenessReturn {
 const DEFAULT_CHALLENGE_TIMEOUT = 35000;
 const TURN_HOLD_MS = 3000;         // hold turn for 3s — user needs time to turn head ≥12°
 const RETURN_HOLD_MS = 3000;       // hold center for 3s — unhurried return
+const TURN_BURST_INTERVAL_MS = 600; // capture every 600ms during the scored turn
+const MAX_BURST_FRAMES = 5;         // burst + start/peak/return must stay ≤ 12 schema max
 
 const VIRTUAL_CAMERA_REGEX = /obs|virtual|manycam|snap camera|fake|xsplit|streamlabs/i;
 
@@ -190,11 +192,11 @@ export function useActiveLiveness(options: UseActiveLivenessOptions): UseActiveL
     if (phase !== 'turn' || !videoElement || !canvasElement) return;
 
     let running = true;
+    const isFirstTurn = turnCountRef.current === 0;
 
     const timer = setTimeout(() => {
       if (!running) return;
 
-      const isFirstTurn = turnCountRef.current === 0;
       const base64 = captureFrameAsBase64(videoElement, canvasElement);
       framesRef.current.push({
         frame_base64: base64,
@@ -208,6 +210,25 @@ export function useActiveLiveness(options: UseActiveLivenessOptions): UseActiveL
       setPhase('return_center');
     }, TURN_HOLD_MS);
 
+    // Scored turn only: capture a burst of frames during the hold so the
+    // server can pick the actual max-yaw frame instead of relying on this
+    // single timer landing on the true turn peak (users often turn and look
+    // back at the screen before the 3s hold elapses).
+    let burstCount = 0;
+    const burstTimer = isFirstTurn
+      ? undefined
+      : setInterval(() => {
+          if (!running || burstCount >= MAX_BURST_FRAMES) return;
+          burstCount += 1;
+          const base64 = captureFrameAsBase64(videoElement, canvasElement);
+          if (!base64) return;
+          framesRef.current.push({
+            frame_base64: base64,
+            timestamp: performance.now(),
+            phase: 'turn_burst',
+          });
+        }, TURN_BURST_INTERVAL_MS);
+
     // Timeout check
     const timeoutTimer = setTimeout(() => {
       if (running && phaseRef.current === 'turn') {
@@ -219,6 +240,7 @@ export function useActiveLiveness(options: UseActiveLivenessOptions): UseActiveL
     return () => {
       running = false;
       clearTimeout(timer);
+      if (burstTimer) clearInterval(burstTimer);
       clearTimeout(timeoutTimer);
     };
   }, [phase, videoElement, canvasElement, challengeTimeoutMs]);

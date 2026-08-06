@@ -93,8 +93,10 @@ describe('Liveness Integration: Provider → Gate 4', () => {
       const prodThreshold = getLivenessThresholdSync(false);
       const sandboxThreshold = getLivenessThresholdSync(true);
       expect(sandboxThreshold).toBeLessThan(prodThreshold);
-      expect(prodThreshold).toBe(0.75);
-      expect(sandboxThreshold).toBe(0.65);
+      // Production default is 0.55 (tuned for browser getUserMedia() → canvas
+      // re-encodes — see verificationThresholds.ts); sandbox is 0.45.
+      expect(prodThreshold).toBe(0.55);
+      expect(sandboxThreshold).toBe(0.45);
     });
   });
 

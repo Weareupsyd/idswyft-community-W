@@ -133,6 +133,79 @@ describe('HeadTurnVerifier', () => {
     });
   });
 
+  describe('burst frame peak selection', () => {
+    /**
+     * Build an 11-frame payload matching the real client: 3 warm-up frames,
+     * turn_start, a 5-frame turn_burst, turn_peak, turn_return.
+     * yaw values are per-frame (null = no face detected).
+     */
+    function makeBurstMetadata(yaws: Array<number | null>, direction: 'left' | 'right' = 'left'): HeadTurnLivenessMetadata {
+      const phases = [
+        'turn1_start', 'turn1_peak', 'turn1_return',
+        'turn_start',
+        'turn_burst', 'turn_burst', 'turn_burst', 'turn_burst', 'turn_burst',
+        'turn_peak',
+        'turn_return',
+      ];
+      const frames = phases.map((phase, i) => ({
+        frame_base64: FAKE_FRAME_BASE64,
+        timestamp: 1000 + i * 600,
+        phase,
+      }));
+      return makeMetadata({ frames, challenge_direction: direction });
+    }
+
+    function runBurst(yaws: Array<number | null>, direction: 'left' | 'right' = 'left') {
+      const faceService = createMockFaceService(yaws.map((yaw) => yaw === null ? null : makeFaceDetection({ yaw })));
+      return verifyHeadTurnLiveness(makeBurstMetadata(yaws, direction), faceService);
+    }
+
+    it('recovers the turn peak from a burst frame even when turn_peak is late', async () => {
+      // User turned during the hold (burst frames show the turn) but was
+      // already back near center when the client-asserted turn_peak fired.
+      const yaws = [0, 0, 0, 0, 4, 12, 22, 9, 3, 1, 0];
+      const result = await runBurst(yaws);
+
+      expect(result.checks.head_turn_detected.passed).toBe(true);
+      expect(result.checks.head_turn_detected.detail).toContain('turn_burst');
+      expect(result.checks.correct_direction.passed).toBe(true);
+      expect(result.passed).toBe(true);
+    });
+
+    it('fails when the burst contains no real turn', async () => {
+      const yaws = [0, 0, 0, 0, 1, 2, 3, 1, 0, 2, 0];
+      const result = await runBurst(yaws);
+
+      expect(result.checks.head_turn_detected.passed).toBe(false);
+      expect(result.checks.head_turn_detected.detail).toContain('need >= 12');
+      expect(result.passed).toBe(false);
+      // Face + return + temporal + bbox + virtual all pass → 0.55
+      expect(result.score).toBeCloseTo(0.55, 2);
+    });
+
+    it('fails direction when the only burst turn is the wrong way', async () => {
+      // Asked to turn left (positive yaw) but the burst shows right (negative).
+      const yaws = [0, 0, 0, 0, -2, -8, -22, -10, -3, -1, 0];
+      const result = await runBurst(yaws, 'left');
+
+      expect(result.checks.head_turn_detected.passed).toBe(true);
+      expect(result.checks.correct_direction.passed).toBe(false);
+      expect(result.passed).toBe(false);
+    });
+
+    it('passes even when some burst frames are blurry (no face)', async () => {
+      // Realistic: mid-turn motion blur can make a detector miss a frame.
+      const yaws: Array<number | null> = [0, 0, 0, 0, 4, null, 20, 8, null, 1, 0];
+      const result = await runBurst(yaws);
+
+      // face_present fails on the null frames, but everything else passes →
+      // 0.85 ≥ 0.70 still passes.
+      expect(result.checks.face_present_all_frames.passed).toBe(false);
+      expect(result.checks.head_turn_detected.passed).toBe(true);
+      expect(result.passed).toBe(true);
+    });
+  });
+
   describe('face presence check', () => {
     it('fails when face missing in 2+ frames', async () => {
       const detections = [

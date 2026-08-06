@@ -567,6 +567,7 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
     let livenessScore = 0;
     let livenessPassed = false;
     let livenessSignals: LiveCaptureResult['liveness_signals'];
+    let livenessChecks: LiveCaptureResult['liveness_checks'];
     let livenessMode: 'passive' | 'head_turn' = 'passive';
     const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
@@ -576,6 +577,7 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
         const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
         livenessScore = headTurnResult.score;
         livenessPassed = headTurnResult.passed;
+        livenessChecks = headTurnResult.checks;
         logger.info('Head-turn liveness verification complete', {
           score: livenessScore.toFixed(3),
           passed: livenessPassed,
@@ -640,6 +642,7 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
       liveness_provider: livenessProvider.name,
       liveness_mode: livenessMode,
       liveness_signals: livenessSignals,
+      liveness_checks: livenessChecks,
       deepfake_check,
       face_age: liveFaceAge,
       face_gender: liveFaceGender,

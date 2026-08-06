@@ -11,6 +11,10 @@ export const AnalysisFrameSchema = z.object({
   phase: z.enum([
     'turn1_start', 'turn1_peak', 'turn1_return',
     'turn_start', 'turn_peak', 'turn_return',
+    // Continuous capture during the scored turn — the server picks the
+    // max-yaw frame from these instead of trusting a single client-asserted
+    // peak, so a slightly-late or quick turn is still detected.
+    'turn_burst',
   ]),
   /** RGB value (legacy -- optional, not required for head-turn) */
   color_rgb: z.tuple([z.number(), z.number(), z.number()]).optional(),

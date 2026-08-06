@@ -202,6 +202,12 @@ export const LiveCaptureResultSchema = z.object({
   liveness_provider: z.string().optional(),
   /** 'passive' (single image heuristics) or 'head_turn' (active challenge). */
   liveness_mode: z.enum(['passive', 'head_turn']).optional(),
+  /** Per-check breakdown from the head-turn verifier (transparency / manual review). */
+  liveness_checks: z.record(z.string(), z.object({
+    passed: z.boolean(),
+    weight: z.number().min(0).max(1),
+    detail: z.string().optional(),
+  })).optional(),
   deepfake_check: z.object({
     isReal: z.boolean(),
     realProbability: z.number().min(0).max(1),

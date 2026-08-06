@@ -94,9 +94,30 @@ export function getGenericEUFormat(documentType: string): CountryDocFormat | nul
   return GENERIC_EU_FORMATS[documentType] ?? null;
 }
 
+const UGANDA_NATIONAL_ID_LABELS = {
+  name: [/surname/i, /given\s*names?/i, /full\s*name/i, /name/i],
+  date_of_birth: [/date\s*of\s*birth/i, /dob/i, /born/i, /birth\s*date/i],
+  expiry_date: [/date\s*of\s*expiry/i, /expiry/i, /expires/i, /expiration/i],
+  id_number: [/\bNIN\b/i, /national\s*identification\s*(?:number|no)/i, /card\s*(?:number|no)/i],
+  nationality: [/nationality/i],
+  address: [/address/i, /parish/i, /village/i, /district/i, /sub\s*county/i, /county/i],
+  issuing_authority: [/republic\s*of\s*uganda/i, /national\s*registration/i, /authority/i],
+};
+
 // --- Registry -----------------------------------------------------
 
 export const INTERNATIONAL_ID_FORMATS: Record<string, CountryIdFormat> = {
+  // -- Uganda -----------------------------------------------------
+  UG: {
+    country: 'UG',
+    document_types: [{
+      type: 'national_id',
+      id_number_regex: /^[A-Z0-9]{8,20}$/i,
+      field_labels: UGANDA_NATIONAL_ID_LABELS,
+      date_format: 'DMY',
+      has_mrz: true,
+    }],
+  },
   // -- English-speaking ------------------------------------------
 
   GB: {

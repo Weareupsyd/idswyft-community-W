@@ -395,6 +395,26 @@ export class BarcodeService {
     const cleanText = ocrText.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
     const result: BackOfIdData = { parsed_data: {}, verification_codes: [], security_features: [] };
 
+    // Uganda National ID back fields (parish, village, district, subcounty, county)
+    const ugandaBackFields = [
+      { key: 'parish', patterns: [/parish\s*[:\-]?\s*([A-Z][A-Z\s\-]+)/i, /\bPARISH\b/i] },
+      { key: 'village', patterns: [/village\s*[:\-]?\s*([A-Z][A-Z\s\-]+)/i, /\bVILLAGE\b/i] },
+      { key: 'sub_county', patterns: [/sub[\s_-]*county\s*[:\-]?\s*([A-Z][A-Z\s\-]+)/i, /sub[\s_-]*county/i] },
+      { key: 'county', patterns: [/county\s*[:\-]?\s*([A-Z][A-Z\s\-]+)/i, /\bCOUNTY\b/i] },
+      { key: 'district', patterns: [/district\s*[:\-]?\s*([A-Z][A-Z\s\-]+)/i, /\bDISTRICT\b/i] },
+    ];
+    for (const { key, patterns } of ugandaBackFields) {
+      for (const pattern of patterns) {
+        const match = cleanText.match(pattern);
+        if (match) {
+          const value = (match[1] || match[0]).trim();
+          if (value && value.length > 2) {
+            (result.parsed_data as any)[key] = value;
+          }
+        }
+      }
+    }
+
     // Extract ID/License Number
     const idPatterns = [
       /(?:ID|DL|LICENSE)\s*(?:NO|NUM|NUMBER|#)?\s*:?\s*([A-Z0-9\-\s]{6,20})/i,

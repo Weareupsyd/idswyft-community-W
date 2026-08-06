@@ -146,7 +146,7 @@ export class EnhancedHeuristicProvider implements LivenessProvider {
       key,
       label: this.signalLabels[key] ?? key,
       score: Math.max(0, Math.min(1, score)),
-      weight: this.weights[key as keyof typeof this.weights] ?? 0,
+      weight: (this.weights as Record<string, number>)[key] ?? 0,
       note: notes[key],
     }));
 

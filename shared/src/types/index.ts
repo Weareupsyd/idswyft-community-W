@@ -16,6 +16,22 @@ export interface OCRData {
   nationality?: string;
   issuing_country?: string;
   issuing_authority?: string;
+  // Uganda National ID fields (front and back are independent; no cross-match required)
+  surname?: string;
+  given_names?: string;
+  full_name?: string;
+  nin?: string;
+  card_number?: string;
+  place_of_birth?: string;
+  date_of_issue?: string;
+  date_of_expiry?: string;
+  holder_signature_present?: boolean;
+  village?: string;
+  parish?: string;
+  sub_county?: string;
+  county?: string;
+  district?: string;
+  right_thumb_present?: boolean;
   sex?: string;
   address?: string;
   height?: string;

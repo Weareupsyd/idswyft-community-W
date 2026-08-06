@@ -79,13 +79,23 @@ function downloadFile(url, filePath, redirects = 0) {
 
 // Deepfake detector model (optional — system works without it)
 //
-// The model now lives in the repo at shared/models/deepfake-detector.onnx
-// (see shared/models/README.md) and is copied into the image at build time —
-// there is NO default download URL anymore. To use a remote source, set
-// DEEPFAKE_MODEL_URL explicitly.
+// Default source is a PUBLIC HuggingFace ONNX export (Apache-2.0, int8 ViT,
+// ~87 MB) — no GITHUB_TOKEN or private repo needed; the build downloads it
+// automatically. Override with DEEPFAKE_MODEL_URL for a custom model.
+// The config.json / preprocessor_config.json sidecars are fetched alongside
+// so OnnxDeepfakeDetector can adapt preprocessing + label mapping to the
+// model (see shared/models/README.md).
+const DEEPFAKE_DEFAULT_BASE = 'https://huggingface.co/onnx-community/Deep-Fake-Detector-v2-Model-ONNX/resolve/main';
 const deepfakeModel = {
   fileName: 'deepfake-detector.onnx',
-  url: process.env.DEEPFAKE_MODEL_URL || '',
+  url: process.env.DEEPFAKE_MODEL_URL || `${DEEPFAKE_DEFAULT_BASE}/onnx/model_int8.onnx`,
+  // Sidecar configs from the same public repo. Only used with the default
+  // model; custom DEEPFAKE_MODEL_URL sources are expected to ship their own
+  // config.json / preprocessor_config.json next to the model file.
+  sidecars: process.env.DEEPFAKE_MODEL_URL ? [] : [
+    { fileName: 'config.json', url: `${DEEPFAKE_DEFAULT_BASE}/config.json` },
+    { fileName: 'preprocessor_config.json', url: `${DEEPFAKE_DEFAULT_BASE}/preprocessor_config.json` },
+  ],
 };
 
 /**
@@ -154,6 +164,23 @@ async function downloadModels() {
       `⏭️  Skipped: ${deepfakeModel.fileName} — place the model at shared/models/deepfake-detector.onnx ` +
       '(see shared/models/README.md) or set DEEPFAKE_MODEL_URL to a remote source'
     );
+  }
+
+  // Download sidecar configs (HuggingFace-style) for the default model so the
+  // detector can adapt preprocessing + label mapping automatically.
+  for (const sidecar of deepfakeModel.sidecars || []) {
+    const sidecarPath = path.join(sharedModelsDir, sidecar.fileName);
+    if (fs.existsSync(sidecarPath)) {
+      console.log(`⏭️  Skipped: ${sidecar.fileName} (already exists)`);
+      skipped++;
+      continue;
+    }
+    try {
+      await downloadFile(sidecar.url, sidecarPath);
+      downloaded++;
+    } catch (error) {
+      console.log(`⏭️  Skipped: ${sidecar.fileName} (optional — ${error.message})`);
+    }
   }
 
   console.log('\n📊 Download Summary:');

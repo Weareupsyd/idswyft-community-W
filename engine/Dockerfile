@@ -39,10 +39,11 @@ RUN npm install --include=optional
 # Copy pre-generated models (e.g., deepfake-detector.onnx from export script)
 COPY shared/models/ shared/models/
 
-# Download face detection model weights.
-# The deepfake detector model ships in-repo at shared/models/deepfake-detector.onnx
-# (copied above via COPY shared/models/) — no private release assets or
-# GITHUB_TOKEN are needed at build time. Set DEEPFAKE_MODEL_URL to override.
+# Download face detection model weights + the deepfake detector model.
+# The deepfake model defaults to a PUBLIC HuggingFace ONNX export (Apache-2.0,
+# no GITHUB_TOKEN / private repo needed) and downloads automatically at build
+# time; it can also be committed at shared/models/deepfake-detector.onnx.
+# Set DEEPFAKE_MODEL_URL to override the source.
 COPY engine/download-models.js engine/
 RUN cd engine && node download-models.js
 

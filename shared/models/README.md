@@ -8,44 +8,64 @@ history. They are copied into the engine image at build time
 
 ## deepfake-detector.onnx (optional — system works without it)
 
-- **Architecture:** EfficientNet-B0 binary classifier (real vs. AI-generated
-  face), trained on FaceForensics++, input 224×224 RGB with ImageNet
-  normalization (see `OnnxDeepfakeDetector.ts`).
-- **Expected size:** ~25–50 MB (EfficientNet-B0 fp32 is ≈ 16M params; the
-  older build in the `models-v1.0.0` release was ~30 MB). It is a rounding
-  error inside the ~1.5 GB engine image.
+- **Default model:** [onnx-community/Deep-Fake-Detector-v2-Model-ONNX](https://huggingface.co/onnx-community/Deep-Fake-Detector-v2-Model-ONNX)
+  on HuggingFace — **public, Apache-2.0, no token required**. It is a
+  ViT (google/vit-base-patch16-224-in21k) fine-tuned for real-vs-deepfake
+  classification (92% accuracy on its test set).
+- **File:** `onnx/model_int8.onnx` (~87 MB, int8 — fast on CPU). The repo
+  also has fp32 (343 MB) and q4 (57 MB) variants; switch by changing
+  `DEEPFAKE_MODEL_URL`.
 - **When missing:** `deepfake_check` returns the neutral stub
   `{ isReal: true, realProbability: 0.5, fakeProbability: 0.5 }` and the
   engine logs `Deepfake detector model not found, disabling`.
 
-### How to add it
+### How it's obtained — automatic, no private repo
 
-The file used to be fetched from a private GitHub release at build time via
-`GITHUB_TOKEN`. That dependency was removed — the model now ships in-repo so
-builds work without a token:
+`engine/download-models.js` (and `backend/download-models.js`) download the
+model **automatically at build time** from the public HuggingFace URL above,
+plus two tiny sidecar files next to it:
 
-```bash
-# 1. (once) install git-lfs and enable it for this repo
-git lfs install
-git lfs track "*.onnx"
+- `shared/models/config.json` — label order + input size
+- `shared/models/preprocessor_config.json` — mean/std/rescale normalization
 
-# 2. obtain the ONNX from the org release
-gh release download models-v1.0.0 --repo team-idswyft/idswyft \
-  --pattern deepfake-detector.onnx --dir shared/models/
+`OnnxDeepfakeDetector` parses those sidecars at startup and adapts its
+preprocessing and real/fake output mapping to whatever model is deployed
+(falls back to the original EfficientNet-B0 ImageNet defaults if the
+sidecars are absent). So swapping models is a URL change, not a code change.
 
-# or, if you have a different source:
-#   curl -L -o shared/models/deepfake-detector.onnx "$DEEPFAKE_MODEL_URL"
+### Options
 
-# 3. sanity-check it is a real ONNX (protobuf starts with 0x08, not HTML)
-head -c 4 shared/models/deepfake-detector.onnx | od -c   # expect: 210 ...
+1. **Default (recommended):** do nothing — the build fetches the public model
+   automatically. No `GITHUB_TOKEN`, no private repo, no manual step.
 
-# 4. commit
-git add shared/models/deepfake-detector.onnx .gitattributes
-git commit -m "chore(models): ship deepfake detector ONNX in-repo (LFS)"
-```
+2. **Pin a custom model:** set `DEEPFAKE_MODEL_URL` at build time. If the
+   source is not the default HF repo, ship a `config.json` +
+   `preprocessor_config.json` next to the model file (or accept the
+   EfficientNet-B0 defaults, which fit any 224×224 ImageNet-normalized
+   2-class model with `[fake, real]` logit order).
 
-### Alternative: remote source (no repo change)
+3. **Vendor it in-repo (optional):** commit the ONNX + sidecars under
+   `shared/models/` so builds don't touch the network:
 
-Set `DEEPFAKE_MODEL_URL` at build time and `download-models.js` will fetch it
-into `shared/models/` during the image build. This is the escape hatch for
-teams that cannot commit binaries to git.
+   ```bash
+   git lfs install
+   git lfs track "*.onnx"
+   curl -L -o shared/models/deepfake-detector.onnx \
+     "https://huggingface.co/onnx-community/Deep-Fake-Detector-v2-Model-ONNX/resolve/main/onnx/model_int8.onnx"
+   curl -L -o shared/models/config.json \
+     "https://huggingface.co/onnx-community/Deep-Fake-Detector-v2-Model-ONNX/resolve/main/config.json"
+   curl -L -o shared/models/preprocessor_config.json \
+     "https://huggingface.co/onnx-community/Deep-Fake-Detector-v2-Model-ONNX/resolve/main/preprocessor_config.json"
+   git add shared/models/ .gitattributes
+   git commit -m "chore(models): vendor deepfake detector ONNX (LFS)"
+   ```
+
+### Sanity checks
+
+- `head -c 4 shared/models/deepfake-detector.onnx | od -c` → should start
+  with `210` (ONNX protobuf), not `<` (HTML error page).
+- After deploy, watch the engine log for
+  `Deepfake detector model loaded` with the sidecar-derived settings, and a
+  `deepfake_check` in API responses that is no longer the 0.5/0.5 stub.
+- The check is a **soft flag** (Tier 2, non-blocking) — the blocking
+  anti-spoofing remains the head-turn challenge (Gate 4).

@@ -39,11 +39,12 @@ RUN npm install --include=optional
 # Copy pre-generated models (e.g., deepfake-detector.onnx from export script)
 COPY shared/models/ shared/models/
 
-# Download face detection + deepfake model weights
-# GITHUB_TOKEN enables downloading private release assets (deepfake-detector.onnx)
-ARG GITHUB_TOKEN
+# Download face detection model weights.
+# The deepfake detector model ships in-repo at shared/models/deepfake-detector.onnx
+# (copied above via COPY shared/models/) — no private release assets or
+# GITHUB_TOKEN are needed at build time. Set DEEPFAKE_MODEL_URL to override.
 COPY engine/download-models.js engine/
-RUN cd engine && GITHUB_TOKEN=${GITHUB_TOKEN} node download-models.js
+RUN cd engine && node download-models.js
 
 # Build shared package first (engine depends on it)
 COPY shared/src/ shared/src/

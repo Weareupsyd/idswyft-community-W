@@ -18,8 +18,6 @@ services:
     build:
       context: .
       dockerfile: engine/Dockerfile
-      args:
-        GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
   api:
     build:

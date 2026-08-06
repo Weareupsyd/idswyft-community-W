@@ -101,6 +101,7 @@ export interface SessionHydration {
     provider?: string;
     mode?: 'passive' | 'head_turn';
     signals?: Array<{ key: string; label: string; score: number; weight: number; note?: string }>;
+    checks?: Record<string, { passed: boolean; weight: number; detail?: string }>;
   } | null;
   deepfake_check?: { isReal: boolean; realProbability: number; fakeProbability: number } | null;
   aml_screening?: {
@@ -364,6 +365,7 @@ export class VerificationSession {
       provider: (liveResult as any).liveness_provider,
       mode: (liveResult as any).liveness_mode,
       signals: (liveResult as any).liveness_signals,
+      checks: (liveResult as any).liveness_checks,
     };
     this.state.deepfake_check = liveResult.deepfake_check ?? null;
 

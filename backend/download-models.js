@@ -78,10 +78,14 @@ function downloadFile(url, filePath, redirects = 0) {
 }
 
 // Deepfake detector model (optional — system works without it)
+//
+// The model now lives in the repo at shared/models/deepfake-detector.onnx
+// (see shared/models/README.md) and is copied into the image at build time —
+// there is NO default download URL anymore. To use a remote source, set
+// DEEPFAKE_MODEL_URL explicitly.
 const deepfakeModel = {
   fileName: 'deepfake-detector.onnx',
-  url: process.env.DEEPFAKE_MODEL_URL ||
-    'https://github.com/team-idswyft/idswyft/releases/download/models-v1.0.0/deepfake-detector.onnx',
+  url: process.env.DEEPFAKE_MODEL_URL || '',
 };
 
 /**
@@ -146,7 +150,10 @@ async function downloadModels() {
       console.log(`⏭️  Skipped: ${deepfakeModel.fileName} (optional — download failed: ${error.message})`);
     }
   } else {
-    console.log(`⏭️  Skipped: ${deepfakeModel.fileName} (optional — no DEEPFAKE_MODEL_URL set)`);
+    console.log(
+      `⏭️  Skipped: ${deepfakeModel.fileName} — place the model at shared/models/deepfake-detector.onnx ` +
+      '(see shared/models/README.md) or set DEEPFAKE_MODEL_URL to a remote source'
+    );
   }
 
   console.log('\n📊 Download Summary:');

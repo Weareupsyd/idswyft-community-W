@@ -1,0 +1,7 @@
+# ML model binaries — track via Git LFS so the repo stays lean.
+# Requires `git lfs install` + `git lfs track` on the machine that adds the
+# file (or a plain commit if the team prefers; the pointer/lfs filter below
+# is inert when LFS is not installed — the file is committed as-is).
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+shared/models/*.onnx filter=lfs diff=lfs merge=lfs -text

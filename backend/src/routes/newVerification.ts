@@ -576,6 +576,7 @@ async function extractLiveCapture(
   let livenessScore = 0;
   let livenessPassed = false;
   let livenessSignals: LiveCaptureResult['liveness_signals'];
+  let livenessChecks: LiveCaptureResult['liveness_checks'];
   let livenessMode: 'passive' | 'head_turn' = 'passive';
   const livenessThreshold = getLivenessThresholdSync(isSandbox);
 
@@ -586,6 +587,7 @@ async function extractLiveCapture(
       const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
       livenessScore = headTurnResult.score;
       livenessPassed = headTurnResult.passed;
+      livenessChecks = headTurnResult.checks;
       logger.info('Head-turn liveness verification complete', {
         score: livenessScore.toFixed(3),
         passed: livenessPassed,
@@ -657,6 +659,7 @@ async function extractLiveCapture(
     liveness_provider: livenessProvider.name,
     liveness_mode: livenessMode,
     liveness_signals: livenessSignals,
+    liveness_checks: livenessChecks,
     deepfake_check,
   };
 }
@@ -783,6 +786,7 @@ async function fireWebhooksIfTerminal(
         liveness_provider: state.liveness?.provider ?? undefined,
         liveness_mode: state.liveness?.mode ?? undefined,
         liveness_signals: state.liveness?.signals ?? undefined,
+        liveness_checks: (state.liveness as any)?.checks ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -840,6 +844,7 @@ async function fireWebhookEvent(
         face_match_score: state.face_match?.similarity_score ?? undefined,
         liveness_score: state.liveness?.score ?? undefined,
         liveness_passed: state.liveness?.passed ?? undefined,
+        liveness_checks: (state.liveness as any)?.checks ?? undefined,
         failure_reason: state.rejection_detail ?? undefined,
       },
     };
@@ -2046,6 +2051,7 @@ router.post('/:verification_id/live-capture',
         liveness_provider: (liveResult as any).liveness_provider,
         liveness_mode: (liveResult as any).liveness_mode || (headTurnMetadata ? 'head_turn' : 'passive'),
         liveness_signals: (liveResult as any).liveness_signals ?? null,
+        liveness_checks: (liveResult as any).liveness_checks ?? null,
       },
       deepfake_check: liveResult.deepfake_check ?? null,
       age_estimation: state.age_estimation ?? null,

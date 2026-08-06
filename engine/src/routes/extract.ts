@@ -383,7 +383,8 @@ router.post('/back', upload.single('file'), async (req: Request, res: Response) 
     }
 
     // 2. Build QR payload from barcode data
-    const qrPayload = barcodeData?.pdf417_data?.parsed_data ? {
+    type QrPayload = NonNullable<BackExtractionResult['qr_payload']>;
+    const qrPayload: QrPayload | null = barcodeData?.pdf417_data?.parsed_data ? {
       first_name: barcodeData.pdf417_data.parsed_data.firstName || '',
       last_name: barcodeData.pdf417_data.parsed_data.lastName || '',
       full_name: [barcodeData.pdf417_data.parsed_data.firstName, barcodeData.pdf417_data.parsed_data.lastName].filter(Boolean).join(' '),
@@ -470,10 +471,11 @@ router.post('/back', upload.single('file'), async (req: Request, res: Response) 
     //    what's visible in raw_text rather than returning empty strings.
     if (finalQrPayload) {
       const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
-      const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
-      finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
+      const withRaw: QrPayload = { ...finalQrPayload, raw_text: mergedRaw };
+      const mergedQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
       // Always propagate issuing_country if not already set
-      if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = reqIssuingCountry;
+      if (!mergedQrPayload.issuing_country) mergedQrPayload.issuing_country = reqIssuingCountry;
+      finalQrPayload = mergedQrPayload;
     }
 
     const hasMrz = mrzResult !== null;

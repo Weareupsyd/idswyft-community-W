@@ -522,8 +522,9 @@ async function extractBackDocument(
   if (finalQrPayload) {
     const mergedRaw = (finalQrPayload as any).raw_text || rawText || '';
     const withRaw: any = { ...(finalQrPayload as any), raw_text: mergedRaw };
-    finalQrPayload = mergeLabeledAddressFields(withRaw, mergedRaw);
-    if (!finalQrPayload.issuing_country) finalQrPayload.issuing_country = issuingCountry || 'UG';
+    const merged = mergeLabeledAddressFields(withRaw, mergedRaw) as any;
+    if (!merged.issuing_country) merged.issuing_country = issuingCountry || 'UG';
+    finalQrPayload = merged;
   }
 
   // Build MRZ result for Gate 2

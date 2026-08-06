@@ -176,6 +176,12 @@ export interface WebhookPayload {
   data?: {
     ocr_data?: OCRData;
     face_match_score?: number;
+    liveness_score?: number;
+    liveness_passed?: boolean;
+    liveness_threshold?: number;
+    liveness_provider?: string;
+    liveness_mode?: string;
+    liveness_signals?: Array<{ key: string; label: string; score: number; weight: number; note?: string }>;
     manual_review_reason?: string;
     failure_reason?: string;
   };

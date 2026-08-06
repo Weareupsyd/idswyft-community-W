@@ -19,7 +19,7 @@ const FACE_CONFIDENCE_THRESHOLD = 0.5;
 /** Default liveness threshold — kept in sync with verificationThresholds.LIVENESS.
  *  The route handler passes the environment-appropriate value via
  *  SessionDeps.livenessThreshold (0.55 prod / 0.45 sandbox). */
-const DEFAULT_LIVENESS_THRESHOLD = 0.55;
+export const DEFAULT_LIVENESS_THRESHOLD = 0.55;
 
 export function evaluateGate4(
   liveCapture: LiveCaptureResult,

@@ -3,8 +3,19 @@ import { C } from '../../theme';
 import { IdentityCard } from '../credential/IdentityCard';
 import { downloadCardPng, downloadCardPdf } from '../credential/cardExport';
 
+export interface CredentialHolderData {
+  fullName?: string | null;
+  dateOfBirth?: string | null;
+  documentType?: string | null;
+  issuingCountry?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  expiryDate?: string | null;
+}
+
 interface CredentialStepProps {
   verificationId: string;
+  holder?: CredentialHolderData | null;
   onStartNew: () => void;
   onBack: () => void;
 }
@@ -14,6 +25,8 @@ interface CredentialStepProps {
 // No backend API is called, no credential is persisted, and no real
 // Ed25519 signing occurs. This exists purely to show what a W3C JWT-VC
 // looks like. In production, use POST /api/v2/verify/:id/credential instead.
+// The holder data is pulled from the real verification result so the
+// displayed credential reflects the actual verified identity.
 // ─────────────────────────────────────────────────────────────────────────────
 function base64UrlEncode(obj: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(obj));
@@ -25,7 +38,10 @@ function base64UrlEncode(obj: unknown): string {
     .replace(/=+$/, '');
 }
 
-export function buildDemoCredential(verificationId: string): { jwt: string; jti: string; expires_at: string } {
+export function buildDemoCredential(
+  verificationId: string,
+  holder?: CredentialHolderData | null,
+): { jwt: string; jti: string; expires_at: string } {
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + 365 * 24 * 60 * 60 * 1000);
   const iat = Math.floor(issuedAt.getTime() / 1000);
@@ -39,6 +55,13 @@ export function buildDemoCredential(verificationId: string): { jwt: string; jti:
     typ: 'JWT',
     kid: 'did:web:idswyft.app#demo-key',
   };
+
+  // Use real verified data when available; fall back to explicit demo placeholders
+  // only when the underlying fields genuinely aren't present.
+  const fullName = holder?.fullName || 'DEMO HOLDER';
+  const dateOfBirth = holder?.dateOfBirth || '1990-01-01';
+  const documentType = holder?.documentType || 'national_id';
+  const issuingCountry = holder?.issuingCountry || holder?.nationality || 'USA';
 
   const payload = {
     iss: 'did:web:idswyft.app',
@@ -59,10 +82,12 @@ export function buildDemoCredential(verificationId: string): { jwt: string; jti:
         id: subjectId,
         verified: true,
         verificationId,
-        documentType: 'drivers_license',
-        fullName: 'DEMO HOLDER',
-        dateOfBirth: '1990-01-01',
-        issuingCountry: 'USA',
+        documentType,
+        fullName,
+        dateOfBirth,
+        issuingCountry,
+        ...(holder?.idNumber ? { idNumber: holder.idNumber } : {}),
+        ...(holder?.expiryDate ? { documentExpiryDate: holder.expiryDate } : {}),
         demo: true,
       },
     },
@@ -140,6 +165,7 @@ const cardTitle: React.CSSProperties = {
 
 export const CredentialStep: React.FC<CredentialStepProps> = ({
   verificationId,
+  holder,
   onStartNew,
   onBack,
 }) => {
@@ -164,7 +190,7 @@ export const CredentialStep: React.FC<CredentialStepProps> = ({
     // Small simulated delay so the "BUILDING CREDENTIAL..." spinner is visible.
     await new Promise(resolve => setTimeout(resolve, 700));
     try {
-      setCredential(buildDemoCredential(verificationId));
+      setCredential(buildDemoCredential(verificationId, holder));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate demo credential');
     } finally {

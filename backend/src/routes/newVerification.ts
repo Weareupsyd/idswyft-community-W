@@ -20,6 +20,7 @@ import { VERIFICATION_THRESHOLDS, getFaceMatchingThresholdSync, getLivenessThres
 import {
   createLivenessProvider,
   verifyHeadTurnLiveness,
+  HEAD_TURN_PASS_THRESHOLD,
   HeadTurnLivenessMetadataSchema,
   VerificationStatus,
   SharpTamperDetector,
@@ -382,17 +383,13 @@ async function extractFrontDocument(
     }
   }
 
-  // Extract face crops as base64 — two variants:
-  //  - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
-  //  - id_face_full_base64:  generously padded crop trimmed to the printed ID photo box
-  //                          (full portrait including shoulders)
+  // Extract face crop as base64 — padded + whitespace-trimmed headshot
+  // (ears/hair/chin preserved)
   let idFaceBase64: string | null = null;
-  let idFaceFullBase64: string | null = null;
   if (imageBuffer && faceBoundingBox) {
     try {
       const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
       idFaceBase64 = crops.id_face_base64;
-      idFaceFullBase64 = crops.id_face_full_base64;
     } catch (err) {
       logger.warn('Failed to extract cropped face from ID image', { error: err });
     }
@@ -414,7 +411,6 @@ async function extractFrontDocument(
     mrz_from_front: mrzFromFront,
     authenticity,
     id_face_base64: idFaceBase64,
-    id_face_full_base64: idFaceFullBase64,
   };
 }
 
@@ -578,10 +574,14 @@ async function extractLiveCapture(
   let livenessSignals: LiveCaptureResult['liveness_signals'];
   let livenessChecks: LiveCaptureResult['liveness_checks'];
   let livenessMode: 'passive' | 'head_turn' = 'passive';
-  const livenessThreshold = getLivenessThresholdSync(isSandbox);
+  // Head-turn uses its own weighted-score threshold (0.70); passive uses the
+  // environment-appropriate heuristic threshold (0.55 prod / 0.45 sandbox).
+  const passiveLivenessThreshold = getLivenessThresholdSync(isSandbox);
+  let livenessThreshold = passiveLivenessThreshold;
 
   if (headTurnMetadata) {
     livenessMode = 'head_turn';
+    livenessThreshold = HEAD_TURN_PASS_THRESHOLD;
     // Head-turn liveness — server-side face analysis of captured frames
     try {
       const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
@@ -599,11 +599,13 @@ async function extractLiveCapture(
     } catch (err) {
       logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
       livenessMode = 'passive';
+      livenessThreshold = passiveLivenessThreshold;
     }
   }
 
   if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
     livenessMode = 'passive';
+    livenessThreshold = passiveLivenessThreshold;
     // Passive liveness — image-based heuristics
     try {
       const detailed = livenessProvider.assessLivenessDetailed
@@ -2546,7 +2548,7 @@ router.get('/:verification_id/status',
 );
 
 // ─── ID Face photo retrieval (developer-scoped) ─────────────────────────────
-// Helper shared by /id-face and /id-face-full
+// Helper shared by /id-face
 async function loadIdFaceForRequest(req: Request, verification_id: string) {
   if (req.sessionVerificationId && req.sessionVerificationId !== verification_id) {
     const err: any = new Error('Verification request not found');
@@ -2588,46 +2590,6 @@ router.get('/:verification_id/id-face',
       success: true,
       verification_id,
       id_face_base64: idFaceBase64,
-      face_confidence: state.front_extraction?.face_confidence ?? null,
-    });
-  })
-);
-
-/**
- * GET /api/v2/verify/:id/id-face-full
- * Returns the full ID portrait (generously padded, whitespace-trimmed to the
- * printed photo box) so ears, hair, chin and shoulders are all captured.
- * Also echoes the tight headshot for convenience, so clients that need both
- * crops only need one round trip.
- */
-router.get('/:verification_id/id-face-full',
-  authenticateAPIKeyOrHandoff,
-  [
-    param('verification_id').isUUID().withMessage('Invalid verification ID'),
-  ],
-  validate,
-  catchAsync(async (req: Request, res: Response) => {
-    const { verification_id } = req.params;
-    const { state } = await loadIdFaceForRequest(req, verification_id);
-
-    const standard = state.front_extraction?.id_face_base64 ?? null;
-    const full = (state.front_extraction as any)?.id_face_full_base64 ?? null;
-
-    if (!standard && !full) {
-      return res.status(404).json({
-        success: false,
-        verification_id,
-        id_face_base64: null,
-        id_face_full_base64: null,
-        message: 'Cropped ID face image not available for this verification',
-      });
-    }
-
-    res.json({
-      success: true,
-      verification_id,
-      id_face_base64: standard,
-      id_face_full_base64: full,
       face_confidence: state.front_extraction?.face_confidence ?? null,
     });
   })

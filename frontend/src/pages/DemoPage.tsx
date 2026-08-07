@@ -1732,6 +1732,15 @@ const DemoPage: React.FC = () => {
       return (
         <CredentialStep
           verificationId={verificationId!}
+          holder={{
+            fullName: (verificationRequest?.ocr_data as any)?.full_name || (verificationRequest?.ocr_data as any)?.name || null,
+            dateOfBirth: (verificationRequest?.ocr_data as any)?.date_of_birth || null,
+            documentType: (verificationRequest?.ocr_data as any)?.detected_document_type || documentType || null,
+            issuingCountry: (verificationRequest?.ocr_data as any)?.issuing_country || null,
+            nationality: (verificationRequest?.ocr_data as any)?.nationality || null,
+            idNumber: (verificationRequest?.ocr_data as any)?.id_number || (verificationRequest?.ocr_data as any)?.document_number || null,
+            expiryDate: (verificationRequest?.ocr_data as any)?.expiry_date || (verificationRequest?.ocr_data as any)?.expiration_date || null,
+          }}
           onStartNew={handleStartNew}
           onBack={() => setCurrentStep(resultsStep)}
         />

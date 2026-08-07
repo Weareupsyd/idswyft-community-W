@@ -1,14 +1,10 @@
 /**
  * Face cropping utilities shared between backend and engine.
  *
- * Two crop variants are produced from the detected face bounding box:
+ * Produces a single crop variant from the detected face bounding box:
  *  - "standard" (`id_face_base64`) — a tight headshot with modest padding so ears,
  *    hairline and chin are included. This replaces the previous bare-bounding-box
  *    crop which was clipping ears on tightly-detected faces.
- *  - "full"     (`id_face_full_base64`) — a generously padded crop that then has
- *    surrounding whitespace/border trimmed back to the visible photo box on the
- *    ID card. This captures the full ID portrait (head + shoulders + photo frame)
- *    for downstream use where the tight headshot is insufficient.
  */
 import type sharp from 'sharp';
 
@@ -39,13 +35,6 @@ export const STANDARD_FACE_CROP: CropOptions = {
   trimWhitespace: true,
   quality: 85,
   trimThreshold: 10,
-};
-
-export const FULL_FACE_CROP: CropOptions = {
-  padding: 1.2,          // 120% padding — captures shoulders + full photo box
-  trimWhitespace: true,
-  quality: 88,
-  trimThreshold: 18,
 };
 
 /**
@@ -108,32 +97,18 @@ export async function cropFaceFromBuffer(
   }
 }
 
-/** Convenience: produce both standard + full face crops in one pass. */
-export async function cropBothFaceVariants(
-  sharpModule: typeof sharp,
-  imageBuffer: Buffer,
-  bbox: FaceBoundingBox,
-): Promise<{ standard: Buffer | null; full: Buffer | null }> {
-  const [standard, full] = await Promise.all([
-    cropFaceFromBuffer(sharpModule, imageBuffer, bbox, STANDARD_FACE_CROP),
-    cropFaceFromBuffer(sharpModule, imageBuffer, bbox, FULL_FACE_CROP),
-  ]);
-  return { standard, full };
-}
-
 function toDataUri(buf: Buffer | null): string | null {
   return buf ? `data:image/jpeg;base64,${buf.toString('base64')}` : null;
 }
 
-/** Convenience: produce both crops as data URIs ready to store/return. */
+/** Convenience: produce the standard face crop as a data URI ready to store/return. */
 export async function cropBothAsDataUris(
   sharpModule: typeof sharp,
   imageBuffer: Buffer,
   bbox: FaceBoundingBox,
-): Promise<{ id_face_base64: string | null; id_face_full_base64: string | null }> {
-  const { standard, full } = await cropBothFaceVariants(sharpModule, imageBuffer, bbox);
+): Promise<{ id_face_base64: string | null }> {
+  const standard = await cropFaceFromBuffer(sharpModule, imageBuffer, bbox, STANDARD_FACE_CROP);
   return {
     id_face_base64: toDataUri(standard),
-    id_face_full_base64: toDataUri(full),
   };
 }

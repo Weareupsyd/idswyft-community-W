@@ -93,8 +93,6 @@ export const FrontExtractionResultSchema = z.object({
   face_gender: z.string().optional(),
   /** Tight-but-padded headshot crop (ears/hair/chin included). */
   id_face_base64: z.string().optional().nullable(),
-  /** Generously padded crop trimmed to the visible ID photo box (full portrait incl. shoulders). */
-  id_face_full_base64: z.string().optional().nullable(),
 });
 
 export type FrontExtractionResult = z.infer<typeof FrontExtractionResultSchema>;

@@ -212,10 +212,28 @@ export function ActiveLivenessCapture({
         <div className="lv-intro">
           <h2 className="lv-intro-title">Camera access required</h2>
           <p className="lv-intro-body">
-            We&apos;ll use your front-facing camera for a quick liveness check
-            to verify it&apos;s really you. Your video is processed for the
+            We'll use your front-facing camera for a quick liveness check
+            to verify it's really you. Your video is processed for the
             check and not stored as a recording.
           </p>
+
+          {/* ── How to pass the head-turn challenge ── */}
+          <div className="lv-instructions">
+            <div className="lv-instructions-title">How to pass the check</div>
+            <ol className="lv-instructions-list">
+              <li>Position your face inside the oval guide, facing the camera directly.</li>
+              <li>Make sure your face is well-lit and not covered (no sunglasses, mask, or hat brim).</li>
+              <li>When the arrow appears, <strong>turn your head fully to the side</strong> — a small tilt is not enough.</li>
+              <li>Turn in the direction shown by the arrow, then <strong>return to center</strong>.</li>
+              <li>Repeat the turn in the opposite direction when prompted.</li>
+              <li>Keep your face in the frame the whole time and move slowly.</li>
+            </ol>
+            <div className="lv-instructions-note">
+              You need to turn your head at least 12° to the side. A quick, full turn
+              works best — don't just glance sideways.
+            </div>
+          </div>
+
           <button onClick={requestCamera} className="lv-btn-primary">
             Start camera
           </button>
@@ -277,7 +295,7 @@ export function ActiveLivenessCapture({
 
   // ── Tip text ──
   const tipText = phase === 'ready' ? 'Good lighting · Face uncovered · No sunglasses'
-    : phase === 'failed' ? 'Ensure good lighting and face is centred'
+    : phase === 'failed' ? 'Turn your head fully to each side — a small tilt is not enough'
     : phase === 'completed' ? 'Verification complete'
     : 'Keep your face visible throughout';
 
@@ -513,6 +531,43 @@ const LIVENESS_CSS = `
   transition: all 0.18s;
 }
 .lv-btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+
+/* ── How-to-pass instructions ── */
+.lv-instructions {
+  width: 100%;
+  max-width: 400px;
+  margin: 4px 0 8px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  text-align: left;
+}
+.lv-instructions-title {
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent);
+}
+.lv-instructions-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: var(--sans);
+  font-size: 13px; line-height: 1.5;
+  color: var(--ink);
+}
+.lv-instructions-list li::marker { color: var(--accent); }
+.lv-instructions-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: var(--accent-dim, rgba(0,212,180,0.08));
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px; line-height: 1.5;
+  color: var(--mid);
+}
 
 /* ── Ambient Glow (removed for v2 -- kept as invisible placeholder) ── */
 .lv-glow {

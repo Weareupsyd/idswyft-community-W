@@ -322,8 +322,24 @@ export const LiveCaptureWidget: React.FC<LiveCaptureWidgetProps> = ({
       onComplete();
     } catch (err: any) {
       if (mountedRef.current) {
-        setError(err.message || 'Liveness verification failed');
-        onError?.(err.message || 'Liveness verification failed');
+        // Map technical backend messages to user-friendly guidance.
+        // The client doesn't have access to the backend, so we translate
+        // rejection reasons into actionable instructions.
+        const rawMsg = err.message || '';
+        let friendlyMsg: string;
+        if (rawMsg.includes('LIVENESS_FAILED') || rawMsg.includes('anti-spoofing') || rawMsg.includes('liveness')) {
+          friendlyMsg = 'Liveness check failed. Please turn your head fully to each side and try again.';
+        } else if (rawMsg.includes('FACE_NOT_DETECTED') || rawMsg.includes('face')) {
+          friendlyMsg = 'No face detected. Please position your face clearly in the frame and try again.';
+        } else if (rawMsg.includes('timeout') || rawMsg.includes('timed out')) {
+          friendlyMsg = 'The request timed out. Please check your connection and try again.';
+        } else if (rawMsg.includes('400') || rawMsg.includes('409')) {
+          friendlyMsg = 'Verification is not ready for live capture. Please complete the previous step first.';
+        } else {
+          friendlyMsg = 'Liveness verification failed. Please try again.';
+        }
+        setError(friendlyMsg);
+        onError?.(friendlyMsg);
       }
     } finally {
       if (mountedRef.current) setLoading(false);

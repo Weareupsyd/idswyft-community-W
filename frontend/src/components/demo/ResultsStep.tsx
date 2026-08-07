@@ -221,24 +221,19 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
         </div>
       )}
 
-      {/* Extracted ID Face Card — standard + full crops */}
+      {/* Extracted ID Face Card — standard headshot crop */}
       {(() => {
         const standard =
           verificationRequest?.id_face_base64 ||
           (verificationRequest?.ocr_data as any)?.id_face_base64 ||
           null;
-        const full =
-          (verificationRequest as any)?.id_face_full_base64 ||
-          (verificationRequest?.ocr_data as any)?.id_face_full_base64 ||
-          null;
-        if (!standard && !full) return null;
+        if (!standard) return null;
 
-        // Build full endpoint URLs using the current origin (self-hosted) or
+        // Build endpoint URL using the current origin (self-hosted) or
         // configured API base, with the real verification_id filled in.
         const apiBase = getDocumentationApiUrl().replace(/\/+$/, '');
         const vid = verificationRequest?.verification_id || verificationRequest?.id || '<verification_id>';
         const headshotUrl = `${apiBase}/api/v2/verify/${vid}/id-face`;
-        const fullUrl = `${apiBase}/api/v2/verify/${vid}/id-face-full`;
         // Pretty-print with a line-break before the ID so long URLs don't blow out the card width
         const breakUrl = (u: string) => {
           const i = u.lastIndexOf('/verify/');
@@ -258,29 +253,17 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
           <div style={cardStyle}>
             <div style={cardTitle}>Extracted ID Face Photo</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-              {standard && (
-                <div style={{ textAlign: 'center' }}>
-                  <img
-                    src={standard}
-                    alt="Cropped face from ID (headshot)"
-                    style={{ width: 80, height: 80, objectFit: 'cover', border: `1px solid ${C.borderStrong}`, display: 'block' }}
-                  />
-                  <div style={{ fontSize: 10, color: C.dim, marginTop: 4, fontFamily: C.mono }}>id-face (headshot)</div>
-                </div>
-              )}
-              {full && (
-                <div style={{ textAlign: 'center' }}>
-                  <img
-                    src={full}
-                    alt="Full portrait from ID (ears/hair/chin/shoulders)"
-                    style={{ height: 100, maxWidth: 120, objectFit: 'contain', border: `1px solid ${C.borderStrong}`, display: 'block', background: '#000' }}
-                  />
-                  <div style={{ fontSize: 10, color: C.dim, marginTop: 4, fontFamily: C.mono }}>id-face-full (portrait)</div>
-                </div>
-              )}
+              <div style={{ textAlign: 'center' }}>
+                <img
+                  src={standard}
+                  alt="Cropped face from ID (headshot)"
+                  style={{ width: 80, height: 80, objectFit: 'cover', border: `1px solid ${C.borderStrong}`, display: 'block' }}
+                />
+                <div style={{ fontSize: 10, color: C.dim, marginTop: 4, fontFamily: C.mono }}>id-face (headshot)</div>
+              </div>
               <div style={{ flex: 1, minWidth: 220 }}>
                 <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginBottom: 6 }}>
-                  {full ? 'Standard + Full Portrait Crops' : 'Cropped Photo from Front ID'}
+                  Cropped Photo from Front ID
                 </div>
                 <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.7, wordBreak: 'break-all' }}>
                   <div>
@@ -289,14 +272,6 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                       GET {breakUrl(headshotUrl)}
                     </code>
                   </div>
-                  {full && (
-                    <div>
-                      <span style={{ color: C.dim }}>Full portrait (ears, hair, shoulders):</span>{' '}
-                      <code style={{ color: C.accent, fontFamily: C.mono, fontSize: 10 }}>
-                        GET {breakUrl(fullUrl)}
-                      </code>
-                    </div>
-                  )}
                   <div style={{ marginTop: 4, fontSize: 10, color: C.dim }}>
                     Replace <code style={{ fontFamily: C.mono }}>{vid === '<verification_id>' ? '<verification_id>' : vid}</code>{' '}
                     with the verification ID returned from <code style={{ fontFamily: C.mono }}>/initialize</code>.

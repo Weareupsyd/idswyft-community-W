@@ -11,10 +11,8 @@ export { scrubSentryEvent, redactPII, scrubText, PII_FIELDS } from './utils/sent
 // Face cropping (shared between backend and engine so ID face crops are consistent)
 export {
   cropFaceFromBuffer,
-  cropBothFaceVariants,
   cropBothAsDataUris,
   STANDARD_FACE_CROP,
-  FULL_FACE_CROP,
 } from './utils/faceCrop.js';
 export type { FaceBoundingBox, CropOptions } from './utils/faceCrop.js';
 
@@ -33,7 +31,7 @@ export type { OCRProvider, FaceMatchingProvider, LivenessProvider, LivenessSigna
 
 // Liveness
 export { EnhancedHeuristicProvider } from './providers/liveness/EnhancedHeuristicProvider.js';
-export { verifyHeadTurnLiveness } from './providers/liveness/HeadTurnVerifier.js';
+export { verifyHeadTurnLiveness, HEAD_TURN_PASS_THRESHOLD } from './providers/liveness/HeadTurnVerifier.js';
 export type { HeadTurnLivenessResult, FaceDetectionService } from './providers/liveness/HeadTurnVerifier.js';
 export { createLivenessProvider } from './providers/liveness/index.js';
 

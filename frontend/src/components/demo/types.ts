@@ -101,7 +101,6 @@ export interface VerificationRequest {
     details: string[];
   } | null;
   id_face_base64?: string | null;
-  id_face_full_base64?: string | null;
   failure_reason?: string | null;
   front_document_uploaded?: boolean;
   back_document_uploaded?: boolean;

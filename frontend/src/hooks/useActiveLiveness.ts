@@ -74,11 +74,11 @@ function pickRandomDirection(): ChallengeDirection {
 function getInstructionForPhase(phase: LivenessPhase, direction: ChallengeDirection): string {
   switch (phase) {
     case 'ready': return 'Position your face in the oval';
-    case 'turn': return direction === 'left' ? 'Slowly turn your head left' : 'Slowly turn your head right';
-    case 'return_center': return 'Now look straight ahead';
+    case 'turn': return direction === 'left' ? 'Turn your head fully to the left' : 'Turn your head fully to the right';
+    case 'return_center': return 'Now look straight ahead at the camera';
     case 'capturing': return 'Hold still — capturing...';
     case 'completed': return 'Liveness check passed!';
-    case 'failed': return 'Liveness check failed. Tap to retry.';
+    case 'failed': return 'We couldn\'t verify your head turn. Please try again.';
     case 'fallback': return 'Camera unavailable. Using standard capture.';
     default: return '';
   }

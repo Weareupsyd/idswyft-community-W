@@ -22,7 +22,7 @@ import { BarcodeService } from '@/services/barcode.js';
 import { FaceRecognitionService } from '@/services/faceRecognition.js';
 import { extractMRZFromText, detectMRZInText, alpha3ToAlpha2 } from '@/services/mrz.js';
 import {
-  createLivenessProvider, verifyHeadTurnLiveness,
+  createLivenessProvider, verifyHeadTurnLiveness, HEAD_TURN_PASS_THRESHOLD,
   HeadTurnLivenessMetadataSchema,
   SharpTamperDetector, DocumentZoneValidator,
   createDeepfakeDetector,
@@ -276,17 +276,13 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
     // Resolve document type: use auto-classified type if available, otherwise raw input
     const resolvedDocType = ocrData?.detected_document_type || documentType;
 
-    // 4. Extract face crops as base64 — two variants:
-    //    - id_face_base64:       padded + whitespace-trimmed headshot (ears/hair/chin preserved)
-    //    - id_face_full_base64:  generously padded crop trimmed to the printed photo box
-    //                            (full portrait including shoulders)
+    // 4. Extract face crop as base64 — padded + whitespace-trimmed headshot
+    //    (ears/hair/chin preserved)
     let idFaceBase64: string | null = null;
-    let idFaceFullBase64: string | null = null;
     if (imageBuffer && faceBoundingBox) {
       try {
         const crops = await cropBothAsDataUris(sharp, imageBuffer, faceBoundingBox);
         idFaceBase64 = crops.id_face_base64;
-        idFaceFullBase64 = crops.id_face_full_base64;
       } catch (err) {
         logger.warn('Failed to extract cropped face from ID image', { error: err });
       }
@@ -340,7 +336,6 @@ router.post('/front', upload.single('file'), async (req: Request, res: Response)
       face_age: faceAge,
       face_gender: faceGender,
       id_face_base64: idFaceBase64,
-      id_face_full_base64: idFaceFullBase64,
     };
 
     logger.info('Front extraction complete', {
@@ -569,10 +564,14 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
     let livenessSignals: LiveCaptureResult['liveness_signals'];
     let livenessChecks: LiveCaptureResult['liveness_checks'];
     let livenessMode: 'passive' | 'head_turn' = 'passive';
-    const livenessThreshold = getLivenessThresholdSync(isSandbox);
+    // Head-turn uses its own weighted-score threshold (0.70); passive uses the
+    // environment-appropriate heuristic threshold (0.55 prod / 0.45 sandbox).
+    const passiveLivenessThreshold = getLivenessThresholdSync(isSandbox);
+    let livenessThreshold = passiveLivenessThreshold;
 
     if (headTurnMetadata) {
       livenessMode = 'head_turn';
+      livenessThreshold = HEAD_TURN_PASS_THRESHOLD;
       try {
         const headTurnResult = await verifyHeadTurnLiveness(headTurnMetadata, faceRecognitionService);
         livenessScore = headTurnResult.score;
@@ -587,11 +586,13 @@ router.post('/live', upload.single('file'), async (req: Request, res: Response) 
       } catch (err) {
         logger.error('Head-turn liveness verifier failed, falling back to passive', { error: err });
         livenessMode = 'passive';
+        livenessThreshold = passiveLivenessThreshold;
       }
     }
 
     if (livenessMode === 'passive' || (livenessScore === 0 && !livenessPassed)) {
       livenessMode = 'passive';
+      livenessThreshold = passiveLivenessThreshold;
       try {
         const detailed = livenessProvider.assessLivenessDetailed
           ? await livenessProvider.assessLivenessDetailed({ buffer: selfieBuffer })

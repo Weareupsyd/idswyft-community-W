@@ -15,8 +15,13 @@ export interface ClassificationResult {
 // MRZ line pattern: uppercase letters, digits, and filler characters (<)
 const MRZ_LINE = /^[A-Z0-9<]{30,44}$/;
 
+// MRZ pattern that can appear anywhere in text (not just on its own line).
+// Passport MRZ starts with P<; ID MRZ starts with I<. Detecting a passport-style
+// MRZ embedded in raw OCR text catches docs where the MRZ is joined to adjacent text.
+const MRZ_PASSPORT_ANYWHERE = /(?:^|\s)P<[A-Z0-9<]{20,43}/;
+
 // Keyword patterns
-const PASSPORT_KW = /PASSPORT/;
+const PASSPORT_KW = /PASSPORT|PSSPORT|PASSEPORT|PSSPRT|PASSPRT|PASSPOR|PASSPO|PASSAPORT/;
 const DL_KW = /DRIVER'?S?\s*(LIC|LICENSE|LICENCE)|DEPARTMENT\s+OF\s+MOTOR|\bDMV\b/;
 const NID_KW = /NATIONAL\s*ID|IDENTITY\s*CARD|CARTE\s*D'IDENTIT|REPUBLIC\s*OF\s*UGANDA|\bUGANDA\b|\bNIN\b|\bNIRA\b/;
 
@@ -67,9 +72,17 @@ export function classifyDocument(rawText: string): ClassificationResult {
     }
   }
 
-  // ── 2. Keyword matching ───────────────────────────────────────
   const upper = rawText.toUpperCase();
 
+  // ── 1b. Passport MRZ embedded anywhere in text (single-line or merged) ──
+  // A passport MRZ always starts with "P<" (type P + filler). Its presence is
+  // decisive even when OCR merged it into one long line with other text.
+  if (MRZ_PASSPORT_ANYWHERE.test(upper)) {
+    signals.push('mrz_passport_anywhere');
+    return { type: 'passport', confidence: 0.95, signals };
+  }
+
+  // ── 2. Keyword matching ───────────────────────────────────────
   if (PASSPORT_KW.test(upper)) {
     signals.push('keyword_passport');
     return { type: 'passport', confidence: 0.85, signals };

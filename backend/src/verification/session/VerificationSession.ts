@@ -374,11 +374,12 @@ export class VerificationSession {
       ?? DEFAULT_LIVENESS_THRESHOLD;
     const gate4 = evaluateGate4(liveResult, effectiveLivenessThreshold);
 
-    if (!gate4.passed) {
-      return this.hardReject(gate4);
-    }
-
-    // Auto-trigger Step 5: Face Match
+    // ── Auto-trigger Step 5: Face Match ─────────────────────────────
+    // Face match ALWAYS runs — even when liveness fails — so the response
+    // always contains a face_match result (success or failure). Previously a
+    // LIVENESS_FAILED hard-reject returned before face match ran, leaving
+    // face_match_results null in the API response even though the selfie WAS
+    // processed and a face WAS detected.
     this.transition(VerificationStatus.FACE_MATCHING);
 
     const idEmbedding = this.state.front_extraction!.face_embedding;
@@ -415,6 +416,12 @@ export class VerificationSession {
     this.state.face_match = faceMatchResult;
     // liveness + deepfake were already recorded above before Gate4 evaluation
     // so that failed runs still surface their score/signals to the UI.
+
+    // If liveness failed, still record the face match result and reject.
+    // The face_match is now persisted so the API response always shows it.
+    if (!gate4.passed) {
+      return this.hardReject(gate4);
+    }
 
     const gate5 = evaluateGate5(faceMatchResult);
     if (!gate5.passed) {

@@ -1454,22 +1454,33 @@ export class PaddleOCRProvider implements OCRProvider {
   private extractPassportData(lines: RecognitionResult[][], ocrData: OCRData): void {
     const flatLines = this.flattenLines(lines);
 
+    // Helper: strip bilingual label prefixes (e.g., "Surname / Nam TUTU" → "TUTU",
+    // "Given Names/ Prenoms MOSES MUGULI" → "MOSES MUGULI") before validation.
+    const cleanBilingualValue = (value: string): string => {
+      let cleaned = this.stripLeadingLabelNoise(value);
+      // Also strip a leading "/" that may remain after label removal
+      cleaned = cleaned.replace(/^\/+\s*/, '').trim();
+      return cleaned;
+    };
+
     // Extract name: try separate surname + given name, then fall back
+    let surname = '';
+    let givenName = '';
     {
-      let surname = '';
-      let givenName = '';
       let nameConf = 0;
       this.findField(flatLines, [/surname/i, /family\s*name/i, /last\s*name/i], (value, conf) => {
-        if (!isHeaderNoise(value) && !SPECIMEN_LABELS.test(value) && !this.isLabelOrNoise(value)) {
-          surname = value;
+        const cleaned = cleanBilingualValue(value);
+        if (cleaned && !isHeaderNoise(cleaned) && !SPECIMEN_LABELS.test(cleaned) && !this.isLabelOrNoise(cleaned)) {
+          surname = cleaned;
           nameConf = Math.max(nameConf, conf);
           return; // accepted
         }
         return false; // rejected — keep searching
       });
       this.findField(flatLines, [/given\s*names?/i, /first\s*name/i, /forename/i], (value, conf) => {
-        if (!isHeaderNoise(value) && !SPECIMEN_LABELS.test(value) && !this.isLabelOrNoise(value)) {
-          givenName = value;
+        const cleaned = cleanBilingualValue(value);
+        if (cleaned && !isHeaderNoise(cleaned) && !SPECIMEN_LABELS.test(cleaned) && !this.isLabelOrNoise(cleaned)) {
+          givenName = cleaned;
           nameConf = Math.max(nameConf, conf);
           return; // accepted
         }
@@ -1490,8 +1501,9 @@ export class PaddleOCRProvider implements OCRProvider {
       } else {
         // Fall back to generic name pattern
         this.findField(flatLines, [/name/i], (value, conf) => {
-          if (!isHeaderNoise(value) && !SPECIMEN_LABELS.test(value) && !this.isLabelOrNoise(value)) {
-            ocrData.name = value;
+          const cleaned = cleanBilingualValue(value);
+          if (cleaned && !isHeaderNoise(cleaned) && !SPECIMEN_LABELS.test(cleaned) && !this.isLabelOrNoise(cleaned)) {
+            ocrData.name = cleaned;
             ocrData.confidence_scores!.name = conf;
             return;
           }
@@ -1505,31 +1517,68 @@ export class PaddleOCRProvider implements OCRProvider {
       ocrData.confidence_scores!.date_of_birth = conf;
     });
 
-    this.findField(flatLines, [/passport\s*no/i, /card\s*no/i, /document\s*no/i, /number/i], (value, conf) => {
-      const cleaned = value.replace(/\s+/g, '');
-      // Passport: 9 alphanumeric; Passport card: letter + 8 digits
+    this.findField(flatLines, [/passport\s*no/i, /passport\s*number/i, /card\s*no/i, /card\s*number/i, /document\s*no/i, /document\s*number/i, /number/i], (value, conf) => {
+      const cleaned = cleanBilingualValue(value).replace(/\s+/g, '');
+      // Passport: 6-9 alphanumeric (e.g., A00933830); Passport card: letter + 8 digits
       if (/^[A-Z0-9]{6,9}$/i.test(cleaned) || /^[A-Z]\d{8}$/i.test(cleaned)) {
         ocrData.document_number = cleaned;
         ocrData.confidence_scores!.document_number = conf;
       }
     });
 
-    // Fallback: scan for passport card number (letter + 8 digits) if not found
+    // Fallback: scan for passport number (letter + 6-8 digits, or 6-9 alphanumeric) if not found
     if (!ocrData.document_number) {
       for (const line of flatLines) {
-        const m = line.text.match(/\b([A-Z]\d{8})\b/);
+        const m = line.text.match(/\b([A-Z]\d{6,8})\b/)
+          ?? line.text.match(/\b([A-Z0-9]{6,9})\b/i)
+          ?? line.text.match(/\b(\d[A-Z0-9]{5,8})\b/i);
         if (m) {
-          ocrData.document_number = m[1];
-          ocrData.confidence_scores!.document_number = line.confidence;
-          break;
+          // Skip values that are clearly dates or header noise
+          const candidate = m[1].replace(/\s+/g, '');
+          if (!/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/.test(candidate) && !isHeaderNoise(candidate)) {
+            ocrData.document_number = candidate;
+            ocrData.confidence_scores!.document_number = line.confidence;
+            break;
+          }
         }
       }
     }
 
-    this.findLastDateField(flatLines, [/date\s*of\s*expiry/i, /expiry/i, /expires/i, /exp/i], (value, conf) => {
+    // Date of issue (before expiry so findLastDateField doesn't confuse the two)
+    this.findDateField(flatLines, [/date\s*of\s*issue/i, /date\s*d'?\s*[eé]mission/i, /issued/i, /issue\s*date/i], (value, conf) => {
+      (ocrData as any).date_of_issue = value;
+      ocrData.confidence_scores!.date_of_issue = conf;
+    });
+
+    // Date of birth (from passport bio page — also extract into date_of_birth)
+    this.findDateField(flatLines, [/date\s*of\s*birth/i, /\bdate\s*de\s*naissance\b/i, /birth/i, /dob/i], (value, conf) => {
+      (ocrData as any).date_of_birth_raw = value;
+      ocrData.date_of_birth = value;
+      ocrData.confidence_scores!.date_of_birth = conf;
+    });
+
+    this.findLastDateField(flatLines, [/date\s*of\s*expiry/i, /\bdate\s*d'?\s*expiration\b/i, /expiry/i, /expires/i, /exp/i], (value, conf) => {
       ocrData.expiration_date = disambiguateExpiryDate(value);
       ocrData.confidence_scores!.expiration_date = conf;
     });
+
+    // Place of birth (e.g., "ENTEBBE" — value may be on same line or next)
+    this.findField(flatLines, [/place\s*of\s*birth/i, /\blieu\s*de\s*naissance\b/i, /\bplace\s*of\s*birth\b/i], (value, conf) => {
+      const cleaned = cleanBilingualValue(value);
+      if (cleaned && cleaned.length >= 2 && !this.isLabelOrNoise(cleaned)) {
+        (ocrData as any).place_of_birth = cleaned;
+        ocrData.confidence_scores!.place_of_birth = conf;
+        return;
+      }
+      return false;
+    });
+
+    // Set given_names + full_name for consistency with national ID shape
+    if (givenName || surname) {
+      (ocrData as any).given_names = givenName;
+      (ocrData as any).surname = surname;
+      (ocrData as any).full_name = ocrData.name || '';
+    }
 
     this.findField(flatLines, [/nationality/i], (value, conf) => {
       // Filter out values that look like labels or noise

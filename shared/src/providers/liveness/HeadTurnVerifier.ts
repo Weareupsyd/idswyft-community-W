@@ -28,7 +28,9 @@ const WEIGHTS = {
   virtual_camera_not_detected: 0.10,
 } as const;
 
-const PASS_THRESHOLD = 0.70;
+/** Minimum weighted score required to pass the head-turn challenge. */
+export const HEAD_TURN_PASS_THRESHOLD = 0.70;
+const PASS_THRESHOLD = HEAD_TURN_PASS_THRESHOLD;
 const MIN_YAW_DELTA = 12;        // degrees
 const RETURN_YAW_TOLERANCE = 8;  // degrees
 const MIN_FACE_CONFIDENCE = 0.3;
